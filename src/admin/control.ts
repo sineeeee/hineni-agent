@@ -85,6 +85,7 @@ export async function controls(
     const key = JSON.stringify([
       seq,
       runtime.db.get(`history:${id}`, {}),
+      runtime.db.get(`history-revision:${id}`, 0),
       effective.history,
     ]);
     let cached = historyViews.get(id);
@@ -182,6 +183,38 @@ export async function controls(
     await lifecycle.restart();
     return reply.code(202).send({ restarting: true });
   });
+  app.delete<{ Params: { agent: string } }>(
+    "/v1/agents/:agent/history",
+    async (req) => {
+      const id = agent(req.params.agent);
+      if (!runtime.cfg.agents.some((a) => a.id === id))
+        throw Error("Save and restart to initialize this agent");
+      const body = z
+        .discriminatedUnion("mode", [
+          z.object({ mode: z.literal("all") }).strict(),
+          z
+            .object({
+              mode: z.literal("selected"),
+              event_ids: z.array(z.string().min(1)).min(1).max(500),
+            })
+            .strict(),
+        ])
+        .parse(req.body);
+      return runtime.eraseHistory(
+        id,
+        body.mode === "all" ? "all" : body.event_ids,
+      );
+    },
+  );
+  app.delete<{ Params: { agent: string } }>(
+    "/v1/agents/:agent/history-summary",
+    async (req) => {
+      const id = agent(req.params.agent);
+      if (!runtime.cfg.agents.some((a) => a.id === id))
+        throw Error("Save and restart to initialize this agent");
+      return runtime.clearHistorySummary(id);
+    },
+  );
   app.get<{
     Params: { agent: string };
     Querystring: {

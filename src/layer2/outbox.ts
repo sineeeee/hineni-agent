@@ -10,6 +10,7 @@ import {
 import { errorText } from "../shared/files.js";
 export class Outbox {
   private busy = false;
+  private sendingAgent: string | null = null;
   private timer?: NodeJS.Timeout;
   private stopping = false;
   constructor(
@@ -62,6 +63,9 @@ export class Outbox {
     });
     this.db.enqueue(d);
   }
+  isSending(agent: string) {
+    return this.sendingAgent === agent;
+  }
   recover() {
     for (const a of this.cfg.agents)
       for (const e of this.db.all(a.id))
@@ -91,6 +95,7 @@ export class Outbox {
     if (!row || row.next_at > Date.now()) return;
     this.busy = true;
     const d = JSON.parse(row.payload) as Delivery;
+    this.sendingAgent = d.agent_id;
     const cfg = this.settings(d.agent_id);
     let index = row.part_index;
     try {
@@ -182,6 +187,7 @@ export class Outbox {
       });
     } finally {
       this.busy = false;
+      this.sendingAgent = null;
     }
   }
   async stop() {

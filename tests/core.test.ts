@@ -1901,3 +1901,125 @@ test("emergency compaction removes the oversized original", async (t) => {
   assert.ok(JSON.stringify(body).length < 20000);
   assert.ok(!JSON.stringify(body).includes("oversized original"));
 });
+
+test("selected deletion removes only chosen second-layer records and copied files", async (t) => {
+  const f = await fixture(t);
+  const root = f.config.agentRoot("main");
+  const file = path.join(root, "attachments", "first");
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, "private attachment");
+  await fs.writeFile(file + ".json", "{}");
+  f.db.attachment({ id: "first", agent_id: "main", path: file, name: "first", mime: "text/plain", status: "ready" });
+  f.db.append({ ...event("remove-me"), text: "unique deleted history text 123", attachments: ["first"] });
+  f.db.append({ ...event("keep-me"), text: "unrelated retained message" });
+  f.db.set("history:main", { through: 1, summary: "independent summary" });
+  const related = path.join(root, ".runtime", "traces", "related.json");
+  const unrelated = path.join(root, ".runtime", "traces", "unrelated.json");
+  await fs.mkdir(path.dirname(related), { recursive: true });
+  await fs.writeFile(related, JSON.stringify({ history: "remove-me unique deleted history text 123" }));
+  await fs.writeFile(unrelated, JSON.stringify({ history: "keep-me unrelated retained message" }));
+  const result = f.db.eraseEvents("main", ["remove-me"]);
+  assert.equal(result.deleted_events, 1);
+  assert.deepEqual(f.db.all("main").map((e) => e.event_id), ["keep-me"]);
+  assert.deepEqual([...new Journal(path.join(f.root, "agents")).read("main")].map((e) => e.event_id), ["keep-me"]);
+  assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "independent summary");
+  assert.equal(f.db.getAttachment("main", "first"), undefined);
+  await assert.rejects(fs.stat(file));
+  await assert.rejects(fs.stat(related));
+  assert.ok((await fs.stat(unrelated)).isFile());
+  assert.equal(f.db.get("history-revision:main", 0), 1);
+  f.db.clearSummary("main");
+  assert.deepEqual(f.db.get("history:main", {}), {});
+  assert.equal(f.db.get("history-revision:main", 0), 2);
+});
+
+test("deleting a reply removes its queued send and rewrites the retained run result", async (t) => {
+  const f = await fixture(t);
+  const trigger = f.db.append(event("trigger"));
+  f.db.claim("main", [trigger], "run-one");
+  const delivery = (id: string): Delivery => ({
+    id, agent_id: "main", run_id: "run-one", response_id: "response", chunk_index: 0,
+    target: event().reply_target!, action: "send", parts: [{ type: "text", text: id }],
+  });
+  const first = delivery("first-reply"), second = delivery("second-reply");
+  f.db.append({ ...event(first.id), type: "agent_reply", run_id: "run-one", text: "delete this reply", data: { delivery: first } });
+  f.db.append({ ...event(second.id), type: "agent_reply", run_id: "run-one", text: "keep this reply", data: { delivery: second } });
+  f.db.enqueue(first); f.db.enqueue(second);
+  f.db.append({ ...event("done"), type: "run_finished", run_id: "run-one", text: JSON.stringify({ reason: "complete", text: "delete this reply\nkeep this reply" }) });
+  f.db.eraseEvents("main", [first.id]);
+  assert.equal(f.db.db.prepare("SELECT id FROM deliveries WHERE id=?").get(first.id), undefined);
+  assert.ok(f.db.db.prepare("SELECT id FROM deliveries WHERE id=?").get(second.id));
+  assert.equal(JSON.parse(f.db.getEvent("main", "done")!.text).text, "keep this reply");
+  assert.equal(f.db.getEvent("main", "trigger")?.event_id, "trigger");
+  assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].find((e) => e.event_id === "done")?.text,
+    JSON.stringify({ reason: "complete", text: "keep this reply" }));
+});
+
+test("all-history deletion is scoped to one agent and recovery cannot restore it", async (t) => {
+  const f = await fixture(t);
+  const extra = { ...event("other-event"), agent_id: "other" };
+  f.db.append(extra);
+  const mainEvent = f.db.append(event("main-event"));
+  f.db.claim("main", [mainEvent], "all-run");
+  f.db.set("history:main", { through: 1, summary: "separate summary" });
+  const persona = path.join(f.config.agentRoot("main"), "persona.md");
+  const before = await fs.readFile(persona, "utf8");
+  const trace = path.join(f.config.agentRoot("main"), ".runtime/traces/all-run.json");
+  await fs.mkdir(path.dirname(trace), { recursive: true });
+  await fs.writeFile(trace, JSON.stringify({ history: "main-event" }));
+  f.db.eraseEvents("main", "all");
+  assert.equal(f.db.all("main").length, 0);
+  assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].length, 0);
+  assert.equal(f.db.all("other").length, 1);
+  assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "separate summary");
+  await assert.rejects(fs.stat(trace));
+  assert.equal(f.db.db.prepare("SELECT id FROM runs WHERE agent_id=?").get("main"), undefined);
+  assert.equal(await fs.readFile(persona, "utf8"), before);
+  f.db.rebuild(["main", "other"]);
+  assert.equal(f.db.all("main").length, 0);
+});
+
+test("history deletion API rejects invalid scopes and keeps summary separate", async (t) => {
+  const f = await fixture(t);
+  process.env.HINENI_TOKEN = "test-token-long-enough-for-authentication";
+  const runtime = new Runtime(f.config, f.db, async () => {}, llm);
+  const scheduler = new Scheduler(f.config, f.db);
+  const server = await servers(f.config, runtime, scheduler);
+  f.cleanup.push(() => server.close());
+  const headers = { authorization: "Bearer " + process.env.HINENI_TOKEN };
+  f.db.append(event("api-delete"));
+  f.db.set("history:main", { through: 1, summary: "keep summary" });
+  const url = "/v1/agents/main/history";
+  (runtime as any).active.set("main", { controller: new AbortController(), promise: Promise.resolve(), runId: "busy" });
+  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "all" } })).statusCode, 409);
+  (runtime as any).active.delete("main");
+  (runtime.outbox as any).sendingAgent = "main";
+  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "all" } })).statusCode, 409);
+  (runtime.outbox as any).sendingAgent = null;
+  assert.equal((await server.api.inject({ method: "DELETE", url, payload: { mode: "all" } })).statusCode, 401);
+  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "selected", event_ids: ["missing"] } })).statusCode, 400);
+  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "all", event_ids: ["api-delete"] } })).statusCode, 400);
+  const result = await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "selected", event_ids: ["api-delete"] } });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.json().deleted_events, 1);
+  assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "keep summary");
+  const summary = await server.api.inject({ method: "DELETE", url: "/v1/agents/main/history-summary", headers, payload: {} });
+  assert.equal(summary.statusCode, 200);
+  assert.deepEqual(f.db.get("history:main", {}), {});
+});
+
+test("an interrupted deletion resumes before journal recovery", async (t) => {
+  const f = await fixture(t);
+  f.db.append(event("crash-delete"));
+  const original = (f.db as any).journal.prune;
+  (f.db as any).journal.prune = () => { throw Error("simulated interruption"); };
+  assert.throws(() => f.db.eraseEvents("main", ["crash-delete"]), /simulated interruption/);
+  (f.db as any).journal.prune = original;
+  assert.ok(f.db.get("erase-events:main", null));
+  const reopened = new Store(path.join(f.root, "data/runtime.sqlite"), new Journal(path.join(f.root, "agents")));
+  reopened.rebuild(["main"]);
+  assert.equal(reopened.all("main").length, 0);
+  assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].length, 0);
+  assert.equal(reopened.get("erase-events:main", null), null);
+  reopened.close();
+});

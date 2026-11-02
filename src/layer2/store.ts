@@ -10,6 +10,14 @@ import type {
   Target,
 } from "../contracts/index.js";
 import { targetKey, triggerTypes } from "../contracts/index.js";
+type EraseJob = {
+  agent: string;
+  all: boolean;
+  ids: string[];
+  files: string[];
+  attachments: string[];
+  replacements: Array<[string, string]>;
+};
 export class Store {
   db: DatabaseSync;
   constructor(
@@ -46,6 +54,10 @@ export class Store {
       .prepare("SELECT value FROM kv WHERE key LIKE 'prune-outbox:%'")
       .all() as any[])
       this.applyPrune(JSON.parse(row.value));
+    for (const row of this.db
+      .prepare("SELECT value FROM kv WHERE key LIKE 'erase-events:%'")
+      .all() as any[])
+      this.applyErase(JSON.parse(row.value));
   }
   rebuild(agents: string[]) {
     if (this.journal)
@@ -167,6 +179,164 @@ export class Store {
       .prepare("SELECT * FROM events WHERE agent_id=? AND event_id=?")
       .get(agent, ref);
     return r ? this.decode(r) : undefined;
+  }
+  eraseEvents(agent: string, selected: string[] | "all") {
+    if (!this.journal) throw Error("History journal is unavailable");
+    const all = selected === "all";
+    const ids = all ? [] : [...new Set(selected)];
+    if (!all && (!ids.length || ids.length > 500))
+      throw Error("Select 1 to 500 records");
+    const selectedRows = all
+      ? []
+      : ids.flatMap((id) => {
+          const e = this.getEvent(agent, id);
+          return e ? [e] : [];
+        });
+    if (!all && selectedRows.length !== ids.length)
+      throw Error("Some selected records no longer exist; refresh first");
+    const removed = new Set(selectedRows.map((e) => e.event_id));
+    const replacements: Array<[string, string]> = [];
+    if (!all) {
+      const affectedRuns = new Set(
+        selectedRows
+          .filter((e) => e.type === "agent_reply" && e.run_id)
+          .map((e) => e.run_id!),
+      );
+      for (const run of affectedRuns) {
+        const retained = this.runEvents(agent, run).filter(
+          (e) => !removed.has(e.event_id),
+        );
+        const text = retained
+          .filter((e) => e.type === "agent_reply")
+          .map((e) => e.text)
+          .join("\n");
+        for (const e of retained.filter((e) => e.type === "run_finished")) {
+          const result = JSON.parse(e.text);
+          replacements.push([
+            e.event_id,
+            JSON.stringify({ ...result, text }),
+          ]);
+        }
+      }
+    }
+    const attachments = all
+      ? (this.db
+          .prepare("SELECT id FROM attachments WHERE agent_id=?")
+          .all(agent) as Array<{ id: string }>).map((x) => x.id)
+      : [...new Set(selectedRows.flatMap((e) => e.attachments))].filter((id) => {
+          for (const row of this.db
+            .prepare("SELECT event_id,payload FROM events WHERE agent_id=?")
+            .iterate(agent) as Iterable<any>) {
+            if (
+              !removed.has(row.event_id) &&
+              (JSON.parse(row.payload) as EventInput).attachments.includes(id)
+            )
+              return false;
+          }
+          return true;
+        });
+    const attachmentFiles = attachments.flatMap((id) => {
+      const a = this.getAttachment(agent, id);
+      return a ? [a.path] : [];
+    });
+    const toolFiles = selectedRows.flatMap((e) =>
+      e.type === "tool_result" && typeof e.data.result_file === "string"
+        ? [e.data.result_file]
+        : [],
+    );
+    const runs = all
+      ? (this.db
+          .prepare("SELECT id FROM runs WHERE agent_id=?")
+          .all(agent) as Array<{ id: string }>).map((x) => x.id)
+      : [];
+    const copied = all
+      ? this.journal.snapshotsForRuns(agent, runs)
+      : this.journal.copiedSnapshots(
+          agent,
+          selectedRows.map((e) => e.event_id),
+          selectedRows.map((e) => e.text),
+        );
+    const deletedCount = all
+      ? Number(
+          (this.db
+            .prepare("SELECT COUNT(*) AS count FROM events WHERE agent_id=?")
+            .get(agent) as { count: number }).count,
+        )
+      : selectedRows.length;
+    const job: EraseJob = {
+      agent,
+      all,
+      ids: selectedRows.map((e) => e.event_id),
+      files: [...new Set([...attachmentFiles, ...toolFiles, ...copied])],
+      attachments,
+      replacements,
+    };
+    this.set("erase-events:" + agent, job);
+    this.applyErase(job);
+    return {
+      deleted_events: deletedCount,
+      deleted_attachments: attachments.length,
+    };
+  }
+  private applyErase(job: EraseJob) {
+    const ids = new Set(job.ids);
+    if (job.all) this.journal?.clear(job.agent);
+    else this.journal?.prune(job.agent, ids, new Map(job.replacements));
+    this.journal?.eraseRelatedFiles(job.agent, job.files);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (job.all) {
+        this.db.prepare("DELETE FROM events WHERE agent_id=?").run(job.agent);
+        this.db.prepare("DELETE FROM runs WHERE agent_id=?").run(job.agent);
+        this.db
+          .prepare("DELETE FROM deliveries WHERE json_extract(payload,'$.agent_id')=?")
+          .run(job.agent);
+        this.db.prepare("DELETE FROM attachments WHERE agent_id=?").run(job.agent);
+      } else {
+        for (const [id, text] of job.replacements) {
+          const e = this.getEvent(job.agent, id);
+          if (!e) continue;
+          const { seq, claimed, received_at, ...payload } = e;
+          this.db
+            .prepare("UPDATE events SET payload=? WHERE agent_id=? AND event_id=?")
+            .run(JSON.stringify({ ...payload, text }), job.agent, id);
+        }
+        for (const id of ids) {
+          this.db
+            .prepare("DELETE FROM events WHERE agent_id=? AND event_id=?")
+            .run(job.agent, id);
+          this.db.prepare("DELETE FROM deliveries WHERE id=?").run(id);
+        }
+        for (const id of job.attachments)
+          this.db
+            .prepare("DELETE FROM attachments WHERE agent_id=? AND id=?")
+            .run(job.agent, id);
+      }
+      this.set(
+        "history-revision:" + job.agent,
+        this.get("history-revision:" + job.agent, 0) + 1,
+      );
+      this.db.prepare("DELETE FROM kv WHERE key=?").run("erase-events:" + job.agent);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  }
+  clearSummary(agent: string) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM kv WHERE key=?").run("history:" + agent);
+      this.set(
+        "history-revision:" + agent,
+        this.get("history-revision:" + agent, 0) + 1,
+      );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   get<T>(key: string, fallback: T): T {
     const r: any = this.db.prepare("SELECT value FROM kv WHERE key=?").get(key);

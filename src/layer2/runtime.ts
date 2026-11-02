@@ -362,6 +362,22 @@ export class Runtime {
     this.active.get(agent)?.controller.abort(new Error("User cancellation"));
     return { cancelled: !!this.active.get(agent) };
   }
+  eraseHistory(agent: string, selected: string[] | "all") {
+    if (this.active.has(agent) || this.outbox.isSending(agent))
+      throw Object.assign(
+        Error("当前 agent 正在执行或发送；先停止并等它结束，再删除记录。"),
+        { statusCode: 409 },
+      );
+    return this.db.eraseEvents(agent, selected);
+  }
+  clearHistorySummary(agent: string) {
+    if (this.active.has(agent))
+      throw Object.assign(Error("当前 agent 正在执行；请等它结束后再清空摘要。"), {
+        statusCode: 409,
+      });
+    this.db.clearSummary(agent);
+    return { cleared: true };
+  }
   status() {
     const agentModels = Object.fromEntries(
       this.cfg.agents.map((a) => {

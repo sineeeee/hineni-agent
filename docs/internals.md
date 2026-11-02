@@ -111,6 +111,10 @@ Store.gap 按当前 Target 的 channel/conversation/thread 找最近一条有文
 
 ## 第二层历史压缩
 
+工作台的删除原始记录独立于压缩摘要。选中删除按 event_id 精确删除；删除一条尚在队列的回复会取消该条发送，并重算同轮 run_finished 的文字副本。清空全部原始记录按 agent_id 删除 events、runs、deliveries、attachments 的对应行与该 agent 的 history 明文；不影响其他 agent。未再被保留事件引用的附件副本也清除。删除意图先记入数据库，明文重写后再提交数据库删除；异常退出后启动时先完成删除，再从明文恢复索引。正在执行或发送的 agent 拒绝此操作。历史修订号使工作台丢弃旧页面缓存。
+
+压缩摘要保存在 `kv.history:<agent>`，删除原文不自动清空。单独清空摘要时也重置 through；之后剩余原文会重新参与历史视图。能确认包含被删事件 ID 或长正文的诊断快照会单独移除；不对第四层运行中的上下文做增量修改。平台已收到的消息不会撤回。
+
 代码：[history.ts](../src/layer2/history.ts)、[models.ts](../src/shared/models.ts)。
 
 历史视图是“累计旧摘要 + 检查点之后的事件原文”。渲染每条事件时带时间、类型、来源、发言人、消息编号、目标、正文和附件清单；工具结果正文只带末尾 toolTailTokens。delivery_result/run_finished 不进入自动历史视图，仍可主动查询原始记录。

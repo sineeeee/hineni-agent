@@ -110,6 +110,8 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 
 `GET /v1/agents/:agent/timeline` 额外返回 history_revision；历史重写时递增，客户端应丢弃旧的累积缓存后重新读取。
 
+`DELETE /v1/agents/:agent/history` 仅管理员口令可用。body 为 `{mode:"selected",event_ids:["..."]}`（1–500 条、事件 ID 必须属于该 agent）或 `{mode:"all"}`。返回 `{deleted_events,deleted_attachments}`。删除原始事件同时更新 JSONL、数据库索引、关联发送队列和被选中记录的派生副本；运行中或该 agent 正在发送时返回 409。压缩摘要独立保留。`DELETE /v1/agents/:agent/history-summary` 单独清空压缩摘要和 through 检查点，不删除原始事件；两类操作均递增 history_revision。普通回复已经送达外部平台时，不向平台请求撤回。
+
 `GET /v1/agents/:agent/history-view?offset=&limit=` 返回累计 summary、through、remaining 分页、token 估计与运行阈值、当前 target/conversation_context，不触发压缩。`GET /v1/agents/:agent/layer2-snapshot?offset=&limit=` 返回最近保存的 layer2 交接快照；旧 trace 标 legacy，无快照返回 unavailable。分页是字符偏移，默认 200000、上限 1000000。
 
 文件清单补充 category/title/purpose/effect/advanced。`POST /v1/models/discover` 支持 `{baseUrl,apiKeyEnv,apiKey?}`：可选 apiKey 优先于已保存凭据，仅本请求使用，不持久化、不回显。

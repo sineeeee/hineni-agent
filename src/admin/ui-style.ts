@@ -11,4 +11,9 @@ export const style = String.raw`
 
 /* Full documentation stays in a scrollable cell, like vad-case-studio's cell-scroll. */
 .inline-guide{min-width:0;align-self:start}.field-guide-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 7px}.field-scroll-hint{font-size:11px;color:#78867e}.field-guide-toolbar button{font-size:11px;padding:3px 7px;min-height:26px}.field-scroll{height:154px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#aebfb5 #eff3ef;padding:0 13px 0 0;font-size:12px;line-height:1.8}.field-scroll::-webkit-scrollbar{width:7px}.field-scroll::-webkit-scrollbar-thumb{background:#b3c4b8;border-radius:5px}.field-scroll::-webkit-scrollbar-track{background:#eff3ef;border-radius:5px}.field-scroll .explanation-section{margin:0 0 16px}.field-scroll .explanation-section h4{font-size:12px;margin:0 0 5px}.field-scroll .explanation-section p{font-size:12px;line-height:1.8}.field-scroll .process-steps{font-size:12px;line-height:1.85}.field-scroll .storage-path{font-size:11px;padding-top:12px}.field-scroll .code-locations{font-size:11px}.inline-guide.expanded .field-scroll{height:auto;overflow:visible}.form-row{min-height:218px}.field-scroll:focus-visible{outline:2px solid #8cae9d;outline-offset:4px;border-radius:3px}@media(max-width:720px){.form-row{min-height:0}.field-scroll{height:154px}.inline-guide.expanded .field-scroll{height:auto}}
+/* Keep selection outside the message bubble so expanding details never toggles it. */
+.history-select-row{display:flex;align-items:flex-start;gap:9px;margin:7px 0}
+.history-select-row>input{margin:16px 0 0;flex:none}
+.history-select-row>.event{flex:1;min-width:0}
+.history-delete-actions{margin:0 0 12px}
 `;

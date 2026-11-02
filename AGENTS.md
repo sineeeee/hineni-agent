@@ -21,6 +21,7 @@
 | 第一层：Telegram、Webhook、聊天绑定 | [入站协议](docs/protocol.md#入站)；[接入流程](docs/internals.md#第一层接入附件与路由) | `src/layer1/channels.ts`：ChannelRegistry；`src/admin/server.ts`：/v1/events |
 | 图片、附件、生成文件 | [附件协议](docs/protocol.md#附件) | `src/layer1/channels.ts` 下载；`src/layer4/tools.ts` 发送工具；`src/layer2/store.ts` 附件状态 |
 | 第二层：记录、轮询、批次、打断 | [记录与打断](docs/internals.md#第二层记录触发与打断) | `src/layer2/runtime.ts`：ingress / tick / execute；`store.ts` 索引；`journal.ts` JSONL |
+| 第二层：删除选中记录、清空原文或摘要 | [工作台删除说明](docs/console.md#工作台的三个视图)；[删除协议](docs/protocol.md#管理接口) | `src/layer2/store.ts`：eraseEvents / clearSummary；`journal.ts` 明文与副本；`src/admin/control.ts` 管理接口 |
 | 历史压缩、查原文、交流间隔 | [历史压缩](docs/internals.md#第二层历史压缩)；[交流间隔](docs/internals.md#交流间隔) | `src/layer2/history.ts`；`src/layer2/store.ts`：gap；`src/layer4/tools.ts`：history_* |
 | 第三层：上下文拼接、预算、Skills 发现 | [上下文与提示词](docs/internals.md#第三层上下文与提示词) | `src/layer3/context.ts`：ContextBuilder.build；`src/shared/tokens.ts` |
 | 记忆写入、索引、查询、召回、遗忘 | [记忆流程](docs/internals.md#第三层长期记忆与索引)；[记忆配置](docs/configuration-guide.md#记忆分别调写入索引召回和遗忘) | `src/layer3/memory.ts`：items / sync / search / recall；`templates/skills/personal-memory/SKILL.md` |
