@@ -279,7 +279,21 @@ export class PiExecutor implements Executor {
         },
         transformContext: async (messages, signal) => {
           const limit =
-            m.contextWindow - m.maxOutput - cfg.context.safetyTokens;
+            m.contextWindow -
+            m.maxOutput -
+            cfg.context.safetyTokens -
+            tokens(req.context.system) -
+            tokens(
+              JSON.stringify(
+                tools.map((t) => ({
+                  name: t.name,
+                  description: t.description,
+                  parameters: t.parameters,
+                })),
+              ),
+            );
+          if (limit < 2000)
+            throw Error("System and tools exceed model context budget");
           const inspect = JSON.stringify(messages, (_k, v) =>
             typeof v === "string" &&
             v.length > 20000 &&
@@ -305,14 +319,16 @@ export class PiExecutor implements Executor {
               signal,
             );
           return [
-            messages[0],
             {
               role: "user",
               content:
                 "本轮工作记录压缩（已经执行的动作不要重做）：\n" +
                 summary +
                 "\n当前请求：\n" +
-                req.context.inputText,
+                cut(
+                  req.context.inputText,
+                  Math.max(500, limit - budget - 1024),
+                ),
               timestamp: Date.now(),
             },
           ] as AgentMessage[];

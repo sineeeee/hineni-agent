@@ -117,3 +117,5 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 管理说明扩展：GET /v1/admin/guide 另返回 lessons（含义、调整效果和更新时机）、processes（读取到写回的步骤和代码位置）、locations（当前 root/config/env/agents/data 绝对路径）。文件清单另含 absolutePath、steps、fields、code。这些是管理页展示信息，不改变四层执行协议。
 
 配置 API 继续返回合并视图；磁盘布局见 [Agent 独立配置](agent-layout.md)。GET /v1/credentials?agent=<id> 与 PUT 的 agent_id 指向个人凭据；未指定使用公共连接凭据。POST /v1/models/discover 可传 agent_id 选择其 Key，同名变量不会混用。
+
+配置接口的 `revision` 是不透明字符串：客户端读取后原样交回，不能递增或自行生成。它由根配置和全部个人配置的文件内容计算，进程重启不会重置；旧页面提交不同版本会被拒绝。保存前还检查外部文件修改，普通写入失败回滚；跨多个文件的突然断电不保证事务原子性。配置草稿与运行中的配置分别展示，保存不等于运行组件已重建。

@@ -1787,3 +1787,117 @@ test("handoff survives failure and manual retry; unfinished deletion resumes bef
     recovered.close();
   }
 });
+
+test("invalid memory edits retain the existing index across process restart", async (t) => {
+  const f = await fixture(t);
+  const root = path.join(f.root, "agents/main");
+  await fs.writeFile(
+    path.join(root, "memory.json"),
+    JSON.stringify({
+      memory: [
+        { id: "keep", occurred_at: "2026-01-01", summary: "保留这条记忆" },
+      ],
+    }),
+  );
+  const memory = new MemoryService(root, "main", f.db, f.config.current, llm);
+  await memory.sync(false);
+  const before = f.db.get("index:main", {});
+  await fs.writeFile(path.join(root, "memory.json"), "{");
+  const restarted = new MemoryService(
+    root,
+    "main",
+    f.db,
+    f.config.current,
+    llm,
+  );
+  await restarted.sync(false);
+  assert.deepEqual(f.db.get("index:main", {}), before);
+});
+
+test("invalid token chunk budgets fail instead of entering a non-progressing loop", async () => {
+  const { chunks } = await import("../src/shared/tokens.js");
+  assert.throws(() => chunks("text", -1, 0));
+  assert.throws(() => chunks("text", 4, 4));
+});
+
+test("emergency compaction removes the oversized original", async (t) => {
+  const f = await fixture(t);
+  let body: any;
+  const server = http.createServer(async (req, res) => {
+    let raw = "";
+    for await (const c of req) raw += c;
+    body = JSON.parse(raw);
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.end(
+      "data: " +
+        JSON.stringify({
+          id: "mock",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "mock",
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: "done" },
+              finish_reason: "stop",
+            },
+          ],
+        }) +
+        "\n\ndata: [DONE]\n\n",
+    );
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise<void>((r) => server.close(() => r())));
+  const cfg = structuredClone(f.config.current);
+  cfg.models.main = {
+    ...cfg.models.main,
+    baseUrl: "http://127.0.0.1:" + (server.address() as any).port + "/v1",
+    contextWindow: 100000,
+  };
+  cfg.runtime.toolsEnabled = false;
+  cfg.runtime.mcpEnabled = false;
+  cfg.mcp = [
+    {
+      name: "unreachable",
+      enabled: true,
+      command: "/missing-test-command",
+      args: [],
+      env: {},
+    },
+  ];
+  const a = cfg.agents[0],
+    root = path.join(f.root, "agents/main");
+  const host: ToolHost = {
+    db: f.db,
+    cfg,
+    agent: a,
+    root,
+    target: a.defaultTarget,
+    memory: new MemoryService(root, a.id, f.db, cfg, llm),
+    send: () => {},
+    silent: () => {},
+    restartScheduler: async () => {},
+    env: { OPENAI_API_KEY: "test-key" },
+  };
+  const result = await new PiExecutor(host, llm, () => {}).run({
+    agentId: a.id,
+    runId: "compaction-check",
+    signal: new AbortController().signal,
+    context: {
+      system: "System rules",
+      messages: [
+        {
+          role: "user",
+          content: "oversized original " + "long ".repeat(110000),
+        },
+      ],
+      memories: [],
+      target: a.defaultTarget,
+      inputText: "current trigger",
+    },
+  });
+  assert.equal(result.reason, "complete");
+  assert.ok(body);
+  assert.ok(JSON.stringify(body).length < 20000);
+  assert.ok(!JSON.stringify(body).includes("oversized original"));
+});

@@ -27,6 +27,7 @@ export const ConfigSchema = z
         adminPort: n(8788, 1),
         tokenEnv: z.string().default("HINENI_TOKEN"),
       })
+      .strict()
       .default(() => ({
         host: "127.0.0.1",
         port: 8787,
@@ -47,6 +48,7 @@ export const ConfigSchema = z
         emotion: model.partial().optional(),
         rerank: model.partial().optional(),
       })
+      .strict()
       .default(() => ({
         main: model.parse({}),
         fast: model.parse({ name: "gpt-4.1-mini", maxOutput: 2000 }),
@@ -63,6 +65,7 @@ export const ConfigSchema = z
         toolTailTokens: n(200, 20),
         pollMs: n(500, 50),
       })
+      .strict()
       .default(() => ({
         triggerTokens: 600000,
         targetTokens: 350000,
@@ -78,6 +81,7 @@ export const ConfigSchema = z
         safetyTokens: n(16384, 100),
         trace: flag(),
       })
+      .strict()
       .default(() => ({
         layer3Tokens: 32000,
         memoryTokens: 20000,
@@ -157,6 +161,7 @@ export const ConfigSchema = z
             activation: 0.1,
           })),
       })
+      .strict()
       .default(() => ({}) as any),
     state: z
       .object({
@@ -184,6 +189,7 @@ export const ConfigSchema = z
         thoughtTtlHours: n(24, 1),
         gap: flag(),
       })
+      .strict()
       .default(() => ({}) as any),
     style: z
       .object({
@@ -200,6 +206,7 @@ export const ConfigSchema = z
         humor: n(0.3),
         directness: n(0.7),
       })
+      .strict()
       .default(() => ({}) as any),
     runtime: z
       .object({
@@ -217,6 +224,7 @@ export const ConfigSchema = z
         cancelGraceMs: n(5000, 100),
         maxToolChars: n(16000, 100),
       })
+      .strict()
       .default(() => ({}) as any),
     delivery: z
       .object({
@@ -228,6 +236,7 @@ export const ConfigSchema = z
           .default("platform"),
         attempts: n(3, 1),
       })
+      .strict()
       .default(() => ({}) as any),
     scheduler: z
       .object({
@@ -242,6 +251,7 @@ export const ConfigSchema = z
         dreamCron: z.string().default("0 4 * * 0"),
         dreamEnabled: flag(),
       })
+      .strict()
       .default(() => ({}) as any),
     prompts: z.record(z.string(), z.string()).default({}),
     drives: z
@@ -353,6 +363,13 @@ export function parseConfig(raw: unknown): Config {
   for (const d of Object.values(c.drives))
     if (d.min > d.baseline || d.baseline > d.max)
       throw Error("Invalid drive bounds");
+  if (
+    c.history.summaryTokens +
+      c.models.main.maxOutput +
+      c.context.safetyTokens >=
+    c.models.main.contextWindow
+  )
+    throw Error("旧摘要预算、模型输出和安全余量之和必须小于主模型上下文容量");
   if (c.memory.chunkOverlap >= c.memory.chunkTokens)
     throw Error("invalid memory chunk overlap");
   for (const a of c.agents)

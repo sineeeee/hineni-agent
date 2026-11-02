@@ -24,12 +24,20 @@ export const agentSections = [
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 export class ConfigStore {
   current!: Config;
-  revision = 0;
+  revision = "";
   private writer: Promise<unknown> = Promise.resolve();
   private versions = new Map<string, string>();
   private environments = new Map<string, NodeJS.ProcessEnv>();
   constructor(public file: string) {}
-  async load() {
+  load() {
+    return this.serialize(() => this.read());
+  }
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const job = this.writer.then(fn);
+    this.writer = job.catch(() => {});
+    return job;
+  }
+  private async read() {
     const source = await fs.readFile(this.file, "utf8");
     const raw = YAML.parse(source);
     if (raw.layoutVersion !== 2) {
@@ -61,7 +69,7 @@ export class ConfigStore {
     for (const a of this.current.agents)
       this.environments.set(a.id, await this.readAgentEnv(a.id));
     await this.capture();
-    this.revision++;
+    this.revision = digest(JSON.stringify([...this.versions]));
     return this.current;
   }
   private async capture() {
@@ -245,29 +253,30 @@ export class ConfigStore {
       await atomicWrite(sharedFile, env);
     }
   }
-  async refreshFromDisk() {
-    for (const [file, hash] of this.versions)
-      if (digest(await fs.readFile(file, "utf8")) !== hash) {
-        await this.load();
-        return;
-      }
+  refreshFromDisk() {
+    return this.serialize(async () => {
+      for (const [file, hash] of this.versions)
+        if (digest(await fs.readFile(file, "utf8")) !== hash) {
+          await this.read();
+          return;
+        }
+    });
   }
-  save(raw: unknown, expectedRevision?: number) {
-    const c = parseConfig(raw);
-    const job = this.writer.then(async () => {
+  save(raw: unknown, expectedRevision?: string) {
+    const c = parseConfig(structuredClone(raw));
+    for (const a of c.agents) agentConfig(c, a);
+    return this.serialize(async () => {
       if (expectedRevision !== undefined && expectedRevision !== this.revision)
-        throw Error("Configuration changed; reload before saving");
+        throw Error(
+          "配置已被其他页面或文件修改，请先暂存草稿，再重新读取并核对。",
+        );
       for (const [file, hash] of this.versions)
         if (digest(await fs.readFile(file, "utf8")) !== hash)
-          throw Error(
-            "Configuration file changed on disk; reload before saving",
-          );
+          throw Error("配置文件已在外部修改，请先暂存草稿，再重新读取并核对。");
       await this.persist(c);
-      await this.load();
+      await this.read();
       return this.current;
     });
-    this.writer = job.catch(() => {});
-    return job;
   }
   root() {
     return path.dirname(this.file);

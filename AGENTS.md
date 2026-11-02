@@ -73,8 +73,10 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 
 ## 验证与交付
 
-`tests/agent-layout.test.ts` 覆盖配置继承、密钥隔离、初始化、个人脚本与重启；`tests/core.test.ts` 覆盖四层行为、工具、MCP、投递、管理页和文档字段覆盖；`tests/admin-form.test.ts` 执行 Agent 表单渲染并覆盖独立配置的列表和枚举；`tests/fixtures/mcp-server.mjs` 是本地模拟服务。
+`tests/agent-layout.test.ts` 覆盖配置继承、密钥隔离、初始化、个人脚本与重启；`tests/core.test.ts` 覆盖四层行为、工具、MCP、投递、管理页和文档字段覆盖；`tests/admin-form.test.ts` 执行 Agent/配置表单，覆盖保存后继续修改、多配置组、JSON 编辑、失败草稿和列表枚举；`tests/fixtures/mcp-server.mjs` 是本地模拟服务。
 
 代码或行为修改后执行 `npm run check`、`npm test`、`npm run build`；说明源变化运行 `npm run docs` 并检查生成差异。纯文档修改核对链接、路径和描述即可。测试用本地临时数据；真实渠道发送与付费 API 调用需按任务范围决定。验证记录写在 [validation.md](docs/validation.md)，说明实际测了什么，不把历史结果当成本次结果。
 
 交付说明改了什么、哪些个人文件已同步、何时生效和验证范围。用户只让改文档时无需重启服务；人格、基础提示词和 Skill 文件下一轮读取。
+
+本轮保存问题与全链路审查见 [2026-11-02 review](docs/review-2026-11-02.md)。修改保存逻辑时，必须验证“修改 → 保存 → 继续修改 → 保存并重启 → 刷新”，不能只测一次 PUT 成功。

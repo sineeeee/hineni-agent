@@ -56,6 +56,7 @@ export class MemoryService {
     private llm: Intelligence,
   ) {}
   private validItems: Memory[] = [];
+  private itemsValid = false;
   private lifecycle = new AbortController();
   close() {
     this.lifecycle.abort(new Error("Shutdown"));
@@ -79,9 +80,11 @@ export class MemoryService {
       if (new Set(out.map((x) => x.id)).size !== out.length)
         throw Error("duplicate memory id");
       if (changed) await jsonWrite(file, { ...raw, memory: out });
+      this.itemsValid = true;
       this.validItems = out;
       return out;
     } catch (e) {
+      this.itemsValid = false;
       this.db.log(
         "warn",
         "memory",
@@ -176,6 +179,7 @@ export class MemoryService {
   }
   async sync(enrich = false) {
     const items = await this.items();
+    if (!this.itemsValid) return items;
     const signature =
       this.cfg.models.embedding.baseUrl + "|" + this.cfg.models.embedding.name;
     await this.mutateIndex(async (index) => {

@@ -127,7 +127,7 @@ test("legacy migration preserves explicit settings; new agents inherit defaults"
   await fs.writeFile(ownFile, YAML.stringify(external));
   await assert.rejects(
     config.save(config.current, config.revision),
-    /changed on disk/,
+    /配置文件已在外部修改/,
   );
   await config.refreshFromDisk();
   assert.equal(config.current.agents[0].name, "External edit");
@@ -502,4 +502,34 @@ test("fresh installation creates sparse main config and separates root and model
     await fs.readFile(path.join(root, "agents/main/persona.md"), "utf8"),
     "Personal text to preserve",
   );
+});
+
+test("saved personal configuration survives fresh load and stale pre-restart edits are rejected", async (t) => {
+  const { root, config } = await setup(t);
+  const stale = structuredClone(config.current),
+    oldRevision = config.revision;
+  const edited = structuredClone(config.current),
+    own = edited.agents[0].overrides as any;
+  own.history.pollMs = 777;
+  own.style.casualChars = 333;
+  own.state.baseline = 55;
+  own.state.emotionLabels = ["平静"];
+  own.models.main.name = "changed-model";
+  own.runtime.maxRounds = 31;
+  own.scheduler.randomMinMinutes = 80;
+  own.delivery.partIntervalMs = 90;
+  own.memory.maxItems = 17;
+  own.prompts = { system: "Keep this prompt" };
+  await config.save(edited, oldRevision);
+  await config.save(config.current, config.revision);
+  const restart = new ConfigStore(path.join(root, "config.yaml"));
+  await restart.load();
+  assert.deepEqual(restart.current.agents[0].overrides, own);
+  assert.equal(restart.revision, config.revision);
+  await assert.rejects(restart.save(stale, oldRevision), /配置已被/);
+  const bytes = await fs.readFile(config.file, "utf8");
+  const invalid = structuredClone(restart.current);
+  (invalid.agents[0].overrides.history as any).targetTokens = 9999999;
+  assert.throws(() => restart.save(invalid, restart.revision));
+  assert.equal(await fs.readFile(config.file, "utf8"), bytes);
 });

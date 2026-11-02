@@ -218,8 +218,12 @@ export async function servers(
     app.put("/v1/config", async (req) => {
       const b = req.body as any;
       if (b.revision !== config.revision)
-        throw Error("Configuration changed; reload before saving");
+        throw Error("配置版本已变化，请先暂存草稿，再重新读取并核对。");
       await config.save(b.config, b.revision);
+      runtime.db.log("info", "config", "Configuration saved and read back", {
+        revision: config.revision,
+        agents: config.current.agents.map((a) => a.id),
+      });
       return {
         revision: config.revision,
         config: config.current,

@@ -22,7 +22,7 @@ export async function application(
   const config = new ConfigStore(path.join(root, "config.yaml"));
   if (fallback) {
     config.current = fallback;
-    config.revision = 1;
+    config.revision = "fallback";
     if (fallbackEnvironments) config.useEnvironments(fallbackEnvironments);
   } else await config.load();
   const db = new Store(

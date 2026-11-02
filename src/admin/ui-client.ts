@@ -31,9 +31,13 @@ const time=s=>s?new Date(s).toLocaleString('zh-CN',{hour12:false}):'—';
 const short=s=>String(s||'').slice(0,8);
 const badge=(text,kind='')=>el('span',{class:'badge '+kind,text});
 const stateNames={complete:'已完成',running:'运行中',error:'执行失败',cancelled:'已中断',silent:'保持沉默',limit:'达到限制',sent:'已送达',queued:'排队中',sending:'发送中',failed:'发送失败',uncertain:'待确认',retry:'等待重试'};
-function markDirty(){dirty=true;$('dirtyBadge').hidden=false;refreshPromptPreviews();}
+let savingConfig=false,configSaveMessage='',configSaveError=false;
+const pendingConfigJson=new Map();
+function stashConfig(){try{localStorage.setItem('hineni-config-draft',JSON.stringify({revision,config:cfg,jsonEdits:[...pendingConfigJson],at:new Date().toISOString()}));return true;}catch{return false;}}
+function configMessage(text,error=false){configSaveMessage=text;configSaveError=error;for(const n of document.querySelectorAll('[data-config-save-status]')){n.textContent=text;n.className=error?'error-text read-status':'read-status';}}
+function markDirty(){dirty=true;$('dirtyBadge').hidden=false;const kept=stashConfig();configMessage(kept?'有未保存修改；已自动保留浏览器草稿。':'有未保存修改；浏览器无法保留草稿，请及时保存或复制 JSON。',!kept);refreshPromptPreviews();}
 function agentOptions(){const prev=agentId;$('agentSelect').replaceChildren();for(const a of cfg.agents)$('agentSelect').append(el('option',{value:a.id,text:a.name+' / '+a.id}));agentId=cfg.agents.some(a=>a.id===prev)?prev:cfg.agents[0].id;$('agentSelect').value=agentId;}
-async function refreshConfig(){const r=await api('/v1/config');cfg=r.config;savedCfg=clone(cfg);revision=r.revision;schema=await api('/v1/config/schema');helpData=await api('/v1/admin/guide');dirty=false;$('dirtyBadge').hidden=true;agentOptions();}
+async function refreshConfig(){const r=await api('/v1/config');cfg=r.config;savedCfg=clone(cfg);revision=r.revision;schema=await api('/v1/config/schema');helpData=await api('/v1/admin/guide');pendingConfigJson.clear();configSaveMessage='';configSaveError=false;dirty=false;$('dirtyBadge').hidden=true;agentOptions();}
 async function connect(){token=$('token').value||token;await refreshConfig();sessionStorage.setItem('hineni-token',token);if($('login').open)$('login').close();$('connection').textContent='已连接本地服务';await refreshStatus();await show(view);}
 async function refreshStatus(){status=await api('/v1/status');$('restartBadge').hidden=!status.restart_required;return status;}
 function canLeave(){if(fileDirty&&!confirm('文件有未保存修改。离开并放弃这些修改？'))return false;fileDirty=false;return true;}
@@ -45,12 +49,30 @@ $('logout').onclick=()=>{$('token').value='';$('login').showModal();};
 $('reloadAll').onclick=()=>task(async()=>{if(!canLeave())return;if(dirty&&!confirm('重新读取将丢弃未保存的配置修改，继续？'))return;await refreshConfig();await refreshStatus();await show(view);notify('已读取当前配置和记录');});
 $('restartService').onclick=()=>task(()=>restart());
 window.addEventListener('beforeunload',e=>{if(dirty||fileDirty){e.preventDefault();e.returnValue='';}});
-async function saveConfig(andRestart=false){const r=await api('/v1/config','PUT',{revision,config:cfg});revision=r.revision;cfg=r.config||cfg;savedCfg=clone(cfg);dirty=false;$('dirtyBadge').hidden=true;$('restartBadge').hidden=false;localStorage.removeItem('hineni-config-draft');notify('已分别保存公共默认和各 agent 配置，重启服务后应用。');if(andRestart)await restart(false);}
-function configActions(){return el('div',{class:'form-actions'},actionHelp(),btn('暂存到浏览器',()=>{localStorage.setItem('hineni-config-draft',JSON.stringify({revision,config:cfg}));notify('已暂存到此浏览器；服务配置尚未改变。');}),btn('恢复暂存',async()=>{const s=localStorage.getItem('hineni-config-draft');if(!s)throw Error('没有暂存配置');const d=JSON.parse(s);if(d.revision!==revision&&!confirm('暂存基于较早版本，恢复后请检查差异。继续？'))return;cfg=d.config;markDirty();agentOptions();await show(view);}),btn('保存配置',()=>saveConfig()),btn('保存并重启',()=>saveConfig(true),'primary'));}
-async function restart(ask=true){if(ask&&!confirm('重启会停止当前工作，已排队消息继续保留。应用已保存的配置？'))return;await api('/v1/service/restart','POST',{});notify('正在重启服务，等待重新连接…');const port=savedCfg.server.adminPort;if(String(port)!==location.port){notify('端口已改变，请打开 http://'+location.hostname+':'+port+' 连接。');return;}
+async function saveConfig(andRestart=false){
+ if(savingConfig)return;
+ try{for(const [p,text] of pendingConfigJson){const value=JSON.parse(text);writeExplicit(p,value===null&&p.includes('.overrides.')?undefined:value);}}catch(e){stashConfig();configMessage('配置 JSON 格式有误：'+e.message+'，未保存；草稿已保留。',true);notify(configSaveMessage,true);return;}
+ const submitted=clone(cfg),submittedRevision=revision;
+ stashConfig();savingConfig=true;$('content').inert=true;$('nav').inert=true;$('agentSelect').disabled=true;$('reloadAll').disabled=true;$('restartService').disabled=true;
+ configMessage('正在保存并从文件重新核对…');
+ try{
+  const r=await api('/v1/config','PUT',{revision:submittedRevision,config:submitted});
+  const verified=await api('/v1/config');
+  if(verified.revision!==r.revision||JSON.stringify(verified.config)!==JSON.stringify(r.config))throw Error('保存后配置又发生变化，草稿仍保留；请重新读取并核对。');
+  revision=r.revision;cfg=r.config;savedCfg=clone(cfg);dirty=false;$('dirtyBadge').hidden=true;$('restartBadge').hidden=false;
+  localStorage.removeItem('hineni-config-draft');pendingConfigJson.clear();
+  configMessage('已保存并核对 · '+new Date().toLocaleTimeString('zh-CN',{hour12:false})+' · 等待重启生效。');
+  agentOptions();await show(view);
+  notify(configSaveMessage);
+  if(andRestart)await restart(false);
+ }catch(e){stashConfig();configMessage('保存或重启未完成：'+e.message+' 浏览器草稿仍保留。',true);notify(configSaveMessage,true);}
+ finally{savingConfig=false;$('content').inert=false;$('nav').inert=false;$('agentSelect').disabled=false;$('reloadAll').disabled=false;$('restartService').disabled=false;}
+}
+function configActions(){return el('div',{class:'form-actions'},el('p',{'data-config-save-status':'',role:'status','aria-live':'polite',class:configSaveError?'error-text read-status':'read-status',style:'flex-basis:100%;margin:0',text:configSaveMessage||(dirty?'有未保存修改。':localStorage.getItem('hineni-config-draft')?'浏览器有未提交草稿，可点击“恢复暂存”。':'当前显示已保存的配置。')}),actionHelp(),btn('暂存到浏览器',()=>{if(!stashConfig())throw Error('浏览器无法写入草稿');configMessage('已暂存到浏览器；尚未写入配置文件。');notify(configSaveMessage);}),btn('恢复暂存',async()=>{const s=localStorage.getItem('hineni-config-draft');if(!s)throw Error('没有暂存配置');const d=JSON.parse(s);if(d.revision!==revision&&!confirm('暂存基于较早版本，恢复后请检查差异。继续？'))return;cfg=d.config;pendingConfigJson.clear();for(const [p,text] of d.jsonEdits||[])pendingConfigJson.set(p,text);markDirty();agentOptions();await show(view);}),btn('保存配置',()=>saveConfig()),btn('保存并重启',()=>saveConfig(true),'primary'));}
+async function restart(ask=true){if(ask&&dirty){configMessage('还有未保存修改。请使用“保存并重启”，或先暂存后重新读取。',true);notify(configSaveMessage,true);return;}if(ask&&!confirm('重启会停止当前工作，已排队消息继续保留。应用已保存的配置？'))return;await api('/v1/service/restart','POST',{});configMessage('配置已保存，正在重启并重新读取…');notify(configSaveMessage);const port=savedCfg.server.adminPort;if(String(port)!==location.port){notify('端口已改变，请打开 http://'+location.hostname+':'+port+' 连接。');return;}
  await new Promise(r=>setTimeout(r,1300));
- for(let i=0;i<40;i++){try{const life=await api('/v1/admin/lifecycle');if(!life.restarting){await refreshConfig();await refreshStatus();await show(view);notify(life.last_restart_error?'新配置启动失败，已恢复原运行配置：'+life.last_restart_error:'服务已重启，配置已生效。',!!life.last_restart_error);return;}}catch{}await new Promise(r=>setTimeout(r,750));}
- notify('服务尚未重新连接。若更换了管理口令，请点左下角重新登录；否则检查进程启动日志。',true);
+ for(let i=0;i<40;i++){try{const life=await api('/v1/admin/lifecycle');if(!life.restarting){await refreshConfig();await refreshStatus();configMessage(life.last_restart_error?'配置已保存，但启动失败；当前继续使用旧配置。':'已保存并重启，配置已生效。',!!life.last_restart_error);await show(view);notify(life.last_restart_error?'新配置启动失败，已恢复原运行配置：'+life.last_restart_error:'服务已重启，配置已生效。',!!life.last_restart_error);return;}}catch{}await new Promise(r=>setTimeout(r,750));}
+ configMessage('配置已保存，但服务尚未重新连接。请检查口令、端口和启动日志。',true);notify(configSaveMessage,true);
 }
 async function downloadFile(path){const r=await fetch('/v1/admin/download?path='+encodeURIComponent(path),{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw Error('下载失败');const url=URL.createObjectURL(await r.blob());const a=el('a',{href:url,download:path.split('/').at(-1)});a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);}
 async function attachmentDownload(id,name){const r=await fetch(agentPath()+'/attachments/'+encodeURIComponent(id),{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw Error('附件尚未就绪');const url=URL.createObjectURL(await r.blob());el('a',{href:url,download:name||id}).click();setTimeout(()=>URL.revokeObjectURL(url),2000);}
@@ -182,15 +204,15 @@ async function renderSettings(){
  let value=personal?merge(cfg[configGroup],a.overrides?.[configGroup]??{}):clone(cfg[configGroup]);
  const prefix=personal?'agents.'+cfg.agents.indexOf(a)+'.overrides.'+configGroup:configGroup;
  const own=()=>personal?a.overrides?.[configGroup]??null:cfg[configGroup];
- const raw=el('textarea',{class:'code',value:JSON.stringify(own(),null,2)});
- const update=(v,p,changed)=>{if(p)writeExplicit(p,changed);else writeExplicit(prefix,v);raw.value=JSON.stringify(own(),null,2);};
- const setGroup=async(v)=>{writeExplicit(prefix,v);await show('settings');};
+ const raw=el('textarea',{class:'code',value:pendingConfigJson.get(prefix)??JSON.stringify(own(),null,2),oninput:e=>{pendingConfigJson.set(prefix,e.target.value);markDirty();}});
+ const update=(v,p,changed)=>{if(p)writeExplicit(p,changed);else writeExplicit(prefix,v);pendingConfigJson.delete(prefix);raw.value=JSON.stringify(own(),null,2);};
+ const setGroup=async(v)=>{pendingConfigJson.delete(prefix);writeExplicit(prefix,v);await show('settings');};
  const body=panel('',el('div',{class:'panel-head'},el('div',{class:'toolbar'},groupSelect,scope,
  ['history','context','memory','state','style','runtime','delivery','scheduler','drives','prompts'].includes(configGroup)?btn('写入出厂值',()=>setGroup(clone(helpData.defaults[configGroup]))):null),
  personal?el('div',{class:'toolbar'},btn('本组恢复继承',()=>setGroup(undefined)),btn('复制当前默认值',()=>setGroup(clone(cfg[configGroup])))):null),
  el('p',{class:'hint',text:personal?'保存到 '+cfg.agentsDir+'/'+agentId+'/config.yaml。自己设置的字段优先；没设置的字段使用公共默认。普通保存不补齐缺省项。':'保存到主目录 config.yaml。修改后会影响仍继承这些字段的 agent；已有个人值保持不变。server/channels 是公共连接设置。'}),
  groupIntro(configGroup),form(value,schema.properties[configGroup],update,configGroup,0,prefix),
- el('details',{class:'object-group'},el('summary',{text:personal?'高级：编辑自己的配置 JSON（仅覆盖项）':'高级：编辑本组 JSON'}),el('p',{text:personal?'这里只显示明确保存的字段。删除字段表示继承，null 表示整组继承；空数组表示明确使用空列表。':'保存本组公共默认值。'}),raw,btn('应用 JSON 到表单',()=>setGroup(personal&&JSON.parse(raw.value)===null?undefined:JSON.parse(raw.value)))));
+ el('details',{class:'object-group'},el('summary',{text:personal?'高级：编辑自己的配置 JSON（仅覆盖项）':'高级：编辑本组 JSON（保存时一并应用）'}),el('p',{text:personal?'这里只显示明确保存的字段。删除字段表示继承，null 表示整组继承；空数组表示明确使用空列表。':'保存本组公共默认值。'}),raw,btn('应用 JSON 到表单',()=>setGroup(personal&&JSON.parse(raw.value)===null?undefined:JSON.parse(raw.value)))));
  return el('div',{},body,configActions());
 }
 let modelScope='agent';
@@ -271,7 +293,7 @@ function inlineFieldExplanation(p,s,v,update){
  const wrap=el('div',{class:'field-guide inline-guide'},el('div',{class:'field-guide-toolbar'},hint,expand),scroll);
  wrap.title=heading;return wrap;
 }
-function actionHelp(file=false){const rows=file?[['暂存到浏览器','只把未完成的编辑放在当前浏览器，不写真实文件。'],['恢复暂存','把浏览器里保存的草稿放回编辑器，仍需点保存文件。'],['放弃未保存修改','重新读取磁盘文件，丢弃编辑器里的未保存内容。'],['保存文件','写到标题显示的真实路径，并检查文件是否已被别处修改。人格、提示词和 Skill 下一轮读取；调度脚本另点重启，记忆文件按维护规则更新。']]:[['暂存到浏览器','把整份配置草稿保存在当前浏览器；程序继续用原配置。清理浏览器数据会丢失暂存。'],['恢复暂存','把该浏览器的草稿恢复到表单，尚未写入 config.yaml，也没有立即生效。'],['保存配置','检查格式并分别写入主目录默认配置和各 agent/config.yaml。主程序继续用已加载的旧设置，页面会提示待重启。'],['保存并重启','先保存，再停止并重建运行组件以读取新配置；正在执行的工作会停止，历史和已排队输出保留。']];return el('details',{class:'action-help'},el('summary',{'aria-label':file?'文件保存操作说明':'配置保存操作说明',title:'查看这些按钮的作用',text:'?'}),el('div',{class:'action-help-popover'},el('h3',{text:'这些按钮分别做什么'}),...rows.map(([title,text])=>el('div',{},el('strong',{text:title}),el('p',{text}))),file?null:el('p',{text:'恢复默认只改表单草稿；恢复继承会删除个人值，以后跟随公共默认；复制默认值会明确写入个人配置，以后不跟随。核对后再保存。模型 Key 写入当前 agent/.env，Bot Token 写入主目录 .env，使用新凭据推理也需要重启。'})));}
+function actionHelp(file=false){const rows=file?[['暂存到浏览器','只把未完成的编辑放在当前浏览器，不写真实文件。'],['恢复暂存','把浏览器里保存的草稿放回编辑器，仍需点保存文件。'],['放弃未保存修改','重新读取磁盘文件，丢弃编辑器里的未保存内容。'],['保存文件','写到标题显示的真实路径，并检查文件是否已被别处修改。人格、提示词和 Skill 下一轮读取；调度脚本另点重启，记忆文件按维护规则更新。']]:[['暂存到浏览器','修改配置时会自动保留浏览器草稿；这个按钮也可手动暂存。程序继续用原配置，清理浏览器数据会丢失草稿。'],['恢复暂存','把该浏览器的草稿恢复到表单，尚未写入 config.yaml，也没有立即生效。'],['保存配置','同时保存表单和配置 JSON 的修改，校验后分别写入主目录默认配置和各 agent/config.yaml，再读回核对。按钮旁显示成功或失败；主程序在重启前继续用旧设置。'],['保存并重启','先保存，再停止并重建运行组件以读取新配置；正在执行的工作会停止，历史和已排队输出保留。']];return el('details',{class:'action-help'},el('summary',{'aria-label':file?'文件保存操作说明':'配置保存操作说明',title:'查看这些按钮的作用',text:'?'}),el('div',{class:'action-help-popover'},el('h3',{text:'这些按钮分别做什么'}),...rows.map(([title,text])=>el('div',{},el('strong',{text:title}),el('p',{text}))),file?null:el('p',{text:'恢复默认只改表单草稿；恢复继承会删除个人值，以后跟随公共默认；复制默认值会明确写入个人配置，以后不跟随。核对后再保存。模型 Key 写入当前 agent/.env，Bot Token 写入主目录 .env，使用新凭据推理也需要重启。'})));}
 
 let historyMode='raw',historyOffset=0,historySignature='';
 async function renderLive(){const modes=el('div',{class:'view-modes'},...Object.entries({raw:'完整原始记录',current:'当前摘要＋剩余原文',last:'最近实际交接'}).map(([key,label])=>btn(label,async()=>{historyMode=key;historyOffset=0;historySignature='';await show('live');},historyMode===key?'active':'')));

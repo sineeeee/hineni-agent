@@ -6,6 +6,14 @@ export const cut = (s: string, max: number) =>
 export const tail = (s: string, max: number) =>
   enc.decode(enc.encode(s).slice(-max));
 export function chunks(s: string, size: number, overlap: number) {
+  if (
+    !Number.isFinite(size) ||
+    !Number.isFinite(overlap) ||
+    size < 1 ||
+    overlap < 0 ||
+    overlap >= size
+  )
+    throw Error("Invalid token chunk size or overlap");
   const a = enc.encode(s),
     out: string[] = [];
   for (let i = 0; i < a.length; i += size - overlap)
