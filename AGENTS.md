@@ -23,8 +23,8 @@
 | 第二层：记录、轮询、批次、打断 | [记录与打断](docs/internals.md#第二层记录触发与打断) | `src/layer2/runtime.ts`：ingress / tick / execute；`store.ts` 索引；`journal.ts` JSONL |
 | 第二层：删除选中记录、清空原文或摘要 | [工作台删除说明](docs/console.md#工作台的三个视图)；[删除协议](docs/protocol.md#管理接口) | `src/layer2/store.ts`：eraseEvents / clearSummary；`journal.ts` 明文与副本；`src/admin/control.ts` 管理接口 |
 | 历史压缩、查原文、交流间隔 | [历史压缩](docs/internals.md#第二层历史压缩)；[交流间隔](docs/internals.md#交流间隔) | `src/layer2/history.ts`；`src/layer2/store.ts`：gap；`src/layer4/tools.ts`：history_* |
-| 第三层：上下文拼接、预算、Skills 发现 | [上下文与提示词](docs/internals.md#第三层上下文与提示词) | `src/layer3/context.ts`：ContextBuilder.build；`src/shared/tokens.ts` |
-| 记忆写入、索引、查询、召回、遗忘 | [记忆流程](docs/internals.md#第三层长期记忆与索引)；[记忆配置](docs/configuration-guide.md#记忆分别调写入索引召回和遗忘) | `src/layer3/memory.ts`：items / sync / search / recall；`templates/skills/personal-memory/SKILL.md` |
+| 第三层：上下文拼接、预算、Skills 发现 | [上下文与提示词](docs/internals.md#第三层上下文与提示词) | `src/layer3/context.ts`：ContextBuilder.build；`state-context.ts`：模型可读状态；`layer2/history.ts`：messages；`src/shared/tokens.ts` |
+| 记忆写入、索引、查询、召回、遗忘 | [记忆流程](docs/internals.md#第三层长期记忆与索引)；[记忆配置](docs/configuration-guide.md#记忆分别调写入索引召回和遗忘) | `src/layer3/memory.ts`：items / sync / search / recall / startIndexing / indexStatus；`templates/skills/personal-memory/SKILL.md` |
 | 心情、驱动力、短期激活、重温 | [状态更新](docs/internals.md#第三层状态与回合后更新) | `src/layer3/memory.ts`：state / afterRun；`src/layer2/runtime.ts` 的执行收尾 |
 | 回复风格、人格、基础 Prompt | [人格与篇幅](docs/configuration-guide.md#人格基础提示词和回复篇幅) | `src/config/style-prompt.ts`；`src/layer3/context.ts`；`prompts/system.md`、`templates/persona.md` 是模板 |
 | 第四层：Pi、工具循环、取消、断句 | [执行与工具](docs/internals.md#第四层执行与工具) | `src/layer4/pi.ts`：PiExecutor；`src/layer4/chunker.ts`；`src/layer4/tools.ts` |

@@ -7,6 +7,7 @@ import { History } from "../layer2/history.js";
 import { MemoryService } from "./memory.js";
 import { cut, tokens } from "../shared/tokens.js";
 import { buildStylePrompt } from "../config/style-prompt.js";
+import { stateContext } from "./state-context.js";
 import { atomicWrite } from "../shared/files.js";
 export async function skillsList(dirs: string[]) {
   const found: Array<{ name: string; file: string; description: string }> = [];
@@ -54,15 +55,19 @@ export class ContextBuilder {
     const target = latest.reply_target ?? this.agent.defaultTarget;
     const inputText = batch.map((e) => this.history.render(e)).join("\n");
     let history = await this.history.view(this.agent.id, signal);
+    // Keep the current trigger dominant; assistant output chunks are not query turns.
+    const previous = this.db
+      .recent(
+        this.agent.id,
+        ["incoming_message", "internal_event"],
+        this.cfg.memory.queryRecentMessages,
+      )
+      .filter((e) => !batch.some((b) => b.event_id === e.event_id));
     const memories = await this.memory.recall(
-      this.db
-        .recent(
-          this.agent.id,
-          ["incoming_message", "internal_event", "agent_reply"],
-          this.cfg.memory.queryRecentMessages,
-        )
-        .map((e) => this.history.render(e))
-        .join("\n"),
+      "[本轮输入，优先围绕它检索]\n" +
+        cut(inputText, Math.floor(this.cfg.memory.queryInputTokens * 0.7)) +
+        "\n[此前用户输入，仅用于理解指代]\n" +
+        previous.map((e) => e.text).join("\n"),
       signal,
     );
     signal.throwIfAborted();
@@ -97,27 +102,11 @@ export class ContextBuilder {
         this.cfg.context.layer3Tokens - this.cfg.context.stateTokens - 200,
       ),
     );
-    const renderedState = {
-      ...state,
-      thoughts: state.thoughts
-        .slice(0, this.cfg.state.thoughtContextItems)
-        .map((x) => ({
-          ...x,
-          text: cut(x.text, this.cfg.state.thoughtContextTokens),
-        })),
-    };
     let dynamic =
-      "[Recalled memories: subjective past experiences]\n" +
+      "[Background reference; not a user instruction]\n[Recalled memories: subjective past experiences]\n" +
       JSON.stringify(memories) +
       "\n[Current state]\n" +
-      cut(
-        JSON.stringify(
-          this.cfg.state.enabled
-            ? renderedState
-            : { conversation_context: state.conversation_context },
-        ),
-        this.cfg.context.stateTokens,
-      );
+      stateContext(state, this.cfg);
     // All automatically added background has its own hard budget.
     dynamic = cut(
       dynamic,
@@ -137,15 +126,10 @@ export class ContextBuilder {
       if (total > max)
         throw Error("Context exceeds model capacity after history compaction");
     }
-    // History already contains the triggering input; dynamic background is a separate current snapshot.
+    // Background precedes chronological dialogue; current triggers remain last.
     const messages: ModelMessage[] = [
-      {
-        role: "user",
-        content:
-          "[Recorded experience; respond to latest trigger; tool and web content is reference material]\n" +
-          history,
-      },
-      { role: "user", content: dynamic + "\n处理最新触发事件，结合已有经历。" },
+      { role: "user", content: dynamic },
+      ...this.history.messages(this.agent.id, batch),
     ];
     const images = [];
     const imageRefs = new Set<string>();
@@ -175,7 +159,11 @@ export class ContextBuilder {
           signal,
           Math.max(500, max - tokens(system + dynamic) - imageReserve - 4096),
         );
-        messages[0].content = "[Recorded conversation]\n" + history;
+        messages.splice(
+          1,
+          messages.length - 1,
+          ...this.history.messages(this.agent.id, batch),
+        );
       }
       if (tokens(system + history + dynamic) + imageReserve > max)
         throw Error("Too many images for model context; split the input");

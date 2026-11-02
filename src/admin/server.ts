@@ -117,12 +117,23 @@ export async function servers(
     );
     app.post<{ Params: { agent: string } }>(
       "/v1/agents/:agent/memory/reindex",
-      async (req) => {
-        const items = await runtime.memories
-          .get(agent(req.params.agent))!
-          .sync(true);
-        return { items: items.length };
+      async (req, reply) => {
+        const memory = runtime.memories.get(agent(req.params.agent))!;
+        const body = z
+          .object({ background: z.boolean().default(false) })
+          .parse(req.body ?? {});
+        if (body.background) {
+          memory.startIndexing();
+          return reply.code(202).send(await memory.indexStatus());
+        }
+        const items = await memory.sync(true);
+        return { items: items.length, ...(await memory.indexStatus()) };
       },
+    );
+    app.get<{ Params: { agent: string } }>(
+      "/v1/agents/:agent/memory/index-status",
+      async (req) =>
+        runtime.memories.get(agent(req.params.agent))!.indexStatus(),
     );
     app.post<{ Params: { agent: string } }>(
       "/v1/agents/:agent/attachments",

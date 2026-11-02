@@ -46,11 +46,11 @@
 | 字段 | 默认 | 作用 |
 |---|---|---|
 | `enabled` | `true` | 自动记忆编排总开关 |
-| `queryRecentMessages` | `8` | 查询模型参考的最近对话条数 |
+| `queryRecentMessages` | `8` | 查询模型参考的近期用户输入条数 |
 | `queryInputTokens` | `2500` | 查询模型输入容量 |
-| `queryTimeoutMs` | `2500` | 查询模型等待上限（毫秒） |
+| `queryTimeoutMs` | `8000` | 查询模型等待上限（毫秒） |
 | `queryCacheSeconds` | `60` | 相同查询缓存时长（秒） |
-| `recallTimeoutMs` | `1500` | 向量查询及重排共用等待预算（毫秒） |
+| `recallTimeoutMs` | `8000` | 向量查询和重排各自等待上限（毫秒） |
 | `rrfK` | `60` | 多路召回排名融合常数 |
 | `vectorThreshold` | `0.18` | 语义相似度过滤阈值，需要随模型实测调整 |
 | `diversityPenalty` | `0.15` | 近似记忆重复出现的降权强度 |
@@ -129,11 +129,11 @@
 
 | 字段 | 默认 | 作用 |
 |---|---|---|
-| `casualParts` | `3` | 闲聊段数软目标 |
+| `casualParts` | `3` | 闲聊段数软上限 |
 | `emotionExpression` | `0.35` | 情绪外显倾向 |
 | `restraint` | `0.6` | 有感受但暂时放下的倾向 |
 | `catchphraseCooldown` | `5` | 提示避免重复口头禅的回合数 |
-| `memoryMentions` | `1` | 闲聊主动提旧事的软目标 |
+| `memoryMentions` | `1` | 闲聊主动提旧事的软上限 |
 | `repeatMemoryCooldown` | `8` | 提示避免重复旧事的回合数 |
 | `allowShortAck` | `true` | 允许一句很短的附和 |
 | `casualChars` | `150` | 闲聊字数软目标 |

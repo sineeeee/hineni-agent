@@ -372,9 +372,12 @@ export class Runtime {
   }
   clearHistorySummary(agent: string) {
     if (this.active.has(agent))
-      throw Object.assign(Error("当前 agent 正在执行；请等它结束后再清空摘要。"), {
-        statusCode: 409,
-      });
+      throw Object.assign(
+        Error("当前 agent 正在执行；请等它结束后再清空摘要。"),
+        {
+          statusCode: 409,
+        },
+      );
     this.db.clearSummary(agent);
     return { cleared: true };
   }
@@ -411,13 +414,16 @@ export class Runtime {
     this.stopping = true;
     clearInterval(this.timer);
     clearInterval(this.maintenance);
-    for (const memory of this.memories.values()) memory.close();
+    const indexing = [...this.memories.values()].map((memory) =>
+      memory.close(),
+    );
     for (const x of this.active.values())
       x.controller.abort(new Error("Shutdown"));
     await Promise.allSettled([...this.active.values()].map((x) => x.promise));
     await this.outbox.stop();
     await this.registry.stop();
     await Promise.allSettled(this.background);
+    await Promise.allSettled(indexing);
     while (this.maintenanceBusy) await new Promise((r) => setTimeout(r, 50));
   }
 }

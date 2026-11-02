@@ -60,6 +60,7 @@ export class MemoryService {
   private lifecycle = new AbortController();
   close() {
     this.lifecycle.abort(new Error("Shutdown"));
+    return this.indexingTask;
   }
   async items() {
     try {
@@ -165,6 +166,62 @@ export class MemoryService {
     return job;
   }
   private enriching = false;
+  private indexingTask?: Promise<void>;
+  private progress = {
+    status: "idle",
+    total: 0,
+    processed: 0,
+    failed: 0,
+    current_id: "",
+    error: "",
+    started_at: "",
+    finished_at: "",
+  };
+  async indexStatus() {
+    const items = await this.items(),
+      index = await this.index();
+    const ready = items.filter(
+      (m) =>
+        index[m.id]?.vectors?.length &&
+        index[m.id].hash ===
+          createHash("sha256").update(JSON.stringify(m)).digest("hex"),
+    ).length;
+    return {
+      ...this.progress,
+      total: items.length,
+      ready,
+      pending: items.length - ready,
+    };
+  }
+  startIndexing() {
+    if (this.indexingTask || this.enriching) return;
+    this.progress = {
+      status: "running",
+      total: 0,
+      processed: 0,
+      failed: 0,
+      current_id: "",
+      error: "",
+      started_at: new Date().toISOString(),
+      finished_at: "",
+    };
+    this.indexingTask = this.sync(true)
+      .then(
+        () => {},
+        (e) => {
+          this.progress.status = "failed";
+          this.progress.error = errorText(e);
+          this.progress.finished_at = new Date().toISOString();
+          this.db.log("warn", "memory", "manual index failed", {
+            agent: this.agentId,
+            error: errorText(e),
+          });
+        },
+      )
+      .finally(() => {
+        this.indexingTask = undefined;
+      });
+  }
   private mutateIndex<T>(
     fn: (index: Record<string, any>) => Promise<T>,
   ): Promise<T> {
@@ -179,7 +236,10 @@ export class MemoryService {
   }
   async sync(enrich = false) {
     const items = await this.items();
-    if (!this.itemsValid) return items;
+    if (!this.itemsValid) {
+      if (enrich) throw Error("memory.json 无效，请先修正文件。");
+      return items;
+    }
     const signature =
       this.cfg.models.embedding.baseUrl + "|" + this.cfg.models.embedding.name;
     await this.mutateIndex(async (index) => {
@@ -207,6 +267,16 @@ export class MemoryService {
     });
     if (!enrich || this.enriching) return items;
     this.enriching = true;
+    this.progress = {
+      status: "running",
+      total: items.length,
+      processed: 0,
+      failed: 0,
+      current_id: "",
+      error: "",
+      started_at: new Date().toISOString(),
+      finished_at: "",
+    };
     try {
       const snapshot = await this.index();
       // Network work happens outside the index writer so normal recall remains responsive.
@@ -221,7 +291,11 @@ export class MemoryService {
         )) {
           if (this.lifecycle.signal.aborted) break;
           const row = snapshot[m.id];
-          if (row.vectors.length) continue;
+          if (row.vectors.length) {
+            this.progress.processed++;
+            continue;
+          }
+          this.progress.current_id = m.id;
           try {
             let description = row.description;
             const deadline = AbortSignal.any([
@@ -261,15 +335,25 @@ export class MemoryService {
               }
             });
           } catch (e) {
+            this.progress.failed++;
+            this.progress.error = errorText(e);
             this.db.log("warn", "memory", "index enrichment failed", {
               agent: this.agentId,
               id: m.id,
               error: errorText(e),
             });
+          } finally {
+            this.progress.processed++;
           }
         }
       }
     } finally {
+      this.progress.status =
+        this.progress.failed || this.lifecycle.signal.aborted
+          ? "failed"
+          : "completed";
+      this.progress.current_id = "";
+      this.progress.finished_at = new Date().toISOString();
       this.enriching = false;
     }
     return items;
@@ -403,7 +487,12 @@ export class MemoryService {
               summary: x.m.summary,
             })),
           },
-          searchSignal,
+          signal
+            ? AbortSignal.any([
+                signal,
+                AbortSignal.timeout(this.cfg.memory.recallTimeoutMs),
+              ])
+            : AbortSignal.timeout(this.cfg.memory.recallTimeoutMs),
           "rerank",
         );
         const order = Array.isArray(out.ids) ? out.ids : [];
@@ -463,15 +552,16 @@ export class MemoryService {
           const deadline = AbortSignal.timeout(this.cfg.memory.queryTimeoutMs);
           const r = await this.llm.json(
             this.cfg.prompts.query ??
-              '根据当前消息和近文生成最多三条查找旧事的查询。返回 {"queries":["..."]}，保留未知，不编造。',
+              '优先理解本轮输入，此前输入仅用于消解指代。只有旧经历能帮助当前回答时才查询，最多三条具体查询；无需旧事时返回空数组。返回 {"queries":["..."]}，不为闲聊强行找旧事，不编造。',
             { text: cut(query, this.cfg.memory.queryInputTokens) },
             signal ? AbortSignal.any([signal, deadline]) : deadline,
             "query",
           );
           if (Array.isArray(r.queries))
-            q +=
-              "\n" +
-              r.queries.slice(0, this.cfg.memory.queryDirections).join("\n");
+            q = r.queries
+              .filter((x: unknown) => typeof x === "string" && x.trim())
+              .slice(0, this.cfg.memory.queryDirections)
+              .join("\n");
           this.queryCache.set(query, { at: Date.now(), text: q });
           if (this.queryCache.size > 50)
             this.queryCache.delete(this.queryCache.keys().next().value!);
@@ -481,6 +571,7 @@ export class MemoryService {
           error: errorText(e),
         });
       }
+    if (!q.trim()) return [];
     const found = await this.search(q, false, this.cfg.memory.maxItems, signal);
     const all = await this.items();
     if (found.length) {

@@ -393,10 +393,39 @@ export class PiExecutor implements Executor {
       try {
         req.signal.throwIfAborted();
         await agent.prompt(
-          req.context.messages.map((x) => ({
-            ...x,
-            timestamp: Date.now(),
-          })) as AgentMessage[],
+          req.context.messages.map((x) =>
+            x.role === "assistant"
+              ? {
+                  role: "assistant",
+                  content:
+                    typeof x.content === "string"
+                      ? [{ type: "text", text: x.content }]
+                      : x.content,
+                  api:
+                    m.protocol === "responses"
+                      ? "openai-responses"
+                      : "openai-completions",
+                  provider: "openai",
+                  model: m.name,
+                  stopReason: "stop",
+                  timestamp: Date.now(),
+                  usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: {
+                      input: 0,
+                      output: 0,
+                      cacheRead: 0,
+                      cacheWrite: 0,
+                      total: 0,
+                    },
+                  },
+                }
+              : { ...x, timestamp: Date.now() },
+          ) as AgentMessage[],
         );
         failure ??= agent.state.errorMessage;
       } finally {

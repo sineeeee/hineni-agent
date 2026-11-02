@@ -1480,7 +1480,7 @@ test("configuration explanations cover every field and preserve executable style
     directness: 0.8,
   };
   const result = buildStylePrompt(style);
-  assert.match(result, /日常优先1句、约80字；复杂交付按需展开/);
+  assert.match(result, /一般不超过1句、80字、3段/);
   assert.match(result, /亲和倾向: 较少/);
   assert.match(result, /幽默倾向: 适中/);
   assert.match(result, /直接表达倾向: 较强/);
@@ -2333,7 +2333,11 @@ test("Responses Pi: reasoning + tools, callbacks, fresh session", async (t) => {
   );
   const context = {
     system: "Test identity only.",
-    messages: [{ role: "user" as const, content: "Write the file." }],
+    messages: [
+      { role: "user" as const, content: "Earlier question" },
+      { role: "assistant" as const, content: "Earlier answer" },
+      { role: "user" as const, content: "Write the file." },
+    ],
     memories: [],
     target: event().reply_target!,
     inputText: "Write the file.",
@@ -2481,7 +2485,8 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
     let raw = "";
     for await (const c of req) raw += c;
     const body = JSON.parse(raw);
-    if (body.text?.format?.type === "json_object") assert.match(JSON.stringify(body.input), /json/i);
+    if (body.text?.format?.type === "json_object")
+      assert.match(JSON.stringify(body.input), /json/i);
     seen.push({ url: req.url, body });
     const text =
       body.text || body.response_format ? '{"queries":["test"]}' : "summary";
@@ -2516,8 +2521,14 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
       baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
     };
     const cfg = parseConfig({
-      agents: [{ id: "main", name: "Main", defaultTarget: {channel: "local", conversation: "owner"} }],
-      channels: [{id: "local", type: "webhook"}],
+      agents: [
+        {
+          id: "main",
+          name: "Main",
+          defaultTarget: { channel: "local", conversation: "owner" },
+        },
+      ],
+      channels: [{ id: "local", type: "webhook" }],
       models: { main: model, fast: model },
     });
     const llm = new OpenAIModels(cfg, { OPENAI_API_KEY: "fake" });
@@ -2540,4 +2551,172 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
       incomplete = false;
     }
   }
+});
+
+test("context preserves dialogue roles, current trigger once last, and hides operational state", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.state.enabled = true;
+  const old = f.db.append({ ...event("old-summary"), text: "old summarized" });
+  f.db.set("history:main", { through: old.seq, summary: "older summary" });
+  f.db.append({ ...event("previous-user"), text: "previous question" });
+  f.db.append({
+    ...event("previous-assistant"),
+    type: "agent_reply",
+    text: "previous answer",
+  });
+  f.db.append({
+    ...event("previous-tool"),
+    type: "tool_result",
+    text: "tool evidence",
+  });
+  const current = f.db.append({
+    ...event("latest-trigger"),
+    text: "current question",
+  });
+  const memory = new MemoryService(
+    f.config.agentRoot("main"),
+    "main",
+    f.db,
+    cfg,
+    llm,
+  );
+  await memory.updateState((s) => {
+    s.activation = { "internal-only-id": Date.now() };
+    s.cause = "happy cause";
+    s.focus_updated_at = new Date().toISOString();
+  });
+  const context = await new ContextBuilder(
+    f.db,
+    cfg,
+    cfg.agents[0],
+    f.config.agentRoot("main"),
+    path.join(f.root, "prompts"),
+    new History(f.db, cfg, llm),
+    memory,
+  ).build([current], "ordered-context", new AbortController().signal);
+  assert.match(String(context.messages[0].content), /Background reference/);
+  assert.match(String(context.messages[0].content), /happy cause/);
+  assert.doesNotMatch(
+    String(context.messages[0].content),
+    /activation|internal-only-id|focus_updated_at|last_response_id/,
+  );
+  assert.match(String(context.messages[1].content), /older summary/);
+  assert.equal(
+    context.messages.find((m) => String(m.content).includes("previous answer"))
+      ?.role,
+    "assistant",
+  );
+  assert.match(
+    String(
+      context.messages.find((m) => String(m.content).includes("tool evidence"))
+        ?.content,
+    ),
+    /Historical tool observation/,
+  );
+  assert.match(String(context.messages.at(-1)?.content), /current question/);
+  assert.equal(
+    JSON.stringify(context.messages).split("current question").length - 1,
+    1,
+  );
+  assert.ok((await memory.state()).activation["internal-only-id"]);
+});
+
+test("empty query skips automatic recall; generated query replaces raw dialogue", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.memory.query = true;
+  cfg.memory.rerank = false;
+  await fs.writeFile(
+    path.join(f.config.agentRoot("main"), "memory.json"),
+    JSON.stringify({
+      memory: [
+        {
+          id: "m",
+          occurred_at: "2026-01-01",
+          summary: "旅行",
+          details: "海边",
+          importance: 3,
+        },
+      ],
+    }),
+  );
+  let queries: string[] = [],
+    seen: string[] = [];
+  const memory = new MemoryService(
+    f.config.agentRoot("main"),
+    "main",
+    f.db,
+    cfg,
+    {
+      ...llm,
+      json: async () => ({ queries }),
+      embed: async (texts) => {
+        seen = texts;
+        return [[1, 0]];
+      },
+    },
+  );
+  assert.deepEqual(await memory.recall("现在几点"), []);
+  assert.deepEqual(seen, []);
+  queries = ["海边旅行"];
+  await memory.recall("最新话题，附带很长的旧话题");
+  assert.deepEqual(seen, ["海边旅行"]);
+});
+
+test("background vectorization reports partial failure, avoids duplicate work and retries missing items", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.memory.searchDescription = false;
+  await fs.writeFile(
+    path.join(f.config.agentRoot("main"), "memory.json"),
+    JSON.stringify({
+      memory: [
+        { id: "one", occurred_at: "2026-01-01", summary: "one", importance: 3 },
+        { id: "two", occurred_at: "2026-01-02", summary: "two", importance: 3 },
+      ],
+    }),
+  );
+  let release!: () => void,
+    calls = 0,
+    fail = true;
+  const gate = new Promise<void>((r) => (release = r));
+  const memory = new MemoryService(
+    f.config.agentRoot("main"),
+    "main",
+    f.db,
+    cfg,
+    {
+      ...llm,
+      embed: async (texts) => {
+        calls++;
+        await gate;
+        if (texts[0].includes("two") && fail) throw Error("test failure");
+        return texts.map(() => [1, 0]);
+      },
+    },
+  );
+  memory.startIndexing();
+  memory.startIndexing();
+  await wait(() => calls === 1);
+  assert.equal((await memory.indexStatus()).status, "running");
+  assert.equal((await memory.indexStatus()).ready, 0);
+  release();
+  await wait(() => calls === 2);
+  await wait(() => !(memory as any).indexingTask);
+  let s = await memory.indexStatus();
+  assert.equal(s.status, "failed");
+  assert.equal(s.ready, 1);
+  assert.equal(s.failed, 1);
+  assert.equal(s.pending, 1);
+  fail = false;
+  memory.startIndexing();
+  await wait(() => !(memory as any).indexingTask);
+  s = await memory.indexStatus();
+  assert.equal(s.status, "completed");
+  assert.equal(s.ready, 2);
+  assert.equal(calls, 3);
+  memory.startIndexing();
+  await wait(() => !(memory as any).indexingTask);
+  assert.equal(calls, 3);
 });

@@ -654,7 +654,7 @@
           "minimum": 100
         },
         "queryTimeoutMs": {
-          "default": 2500,
+          "default": 8000,
           "type": "number",
           "minimum": 100
         },
@@ -664,7 +664,7 @@
           "minimum": 0
         },
         "recallTimeoutMs": {
-          "default": 1500,
+          "default": 8000,
           "type": "number",
           "minimum": 100
         },

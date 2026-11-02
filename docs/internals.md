@@ -148,8 +148,8 @@ description 是辅助描述，当前向量文本仍包含原 summary/details/peo
 ### 自动召回的步骤
 
 1. memory.enabled=false 或没有记忆时直接返回空列表。
-2. 从最近 queryRecentMessages 条 incoming/internal/agent_reply 构造查询材料，截到 queryInputTokens。query 开启时快模型生成 queries；原材料加这些线索拼为同一查询，按完整输入缓存 queryCacheSeconds。
-3. search 先 sync(false)，然后向量化查询前 1000 token。向量 API 失败或超时用空向量继续词法检索。向量与后面的重排共用 recallTimeoutMs。
+2. 本轮输入优先，近期 incoming/internal 仅补充指代，截到 queryInputTokens。query 开启时快模型生成 queries，查询句替代原材料；空数组跳过本轮召回。按完整输入缓存 queryCacheSeconds。
+3. search 先 sync(false)，然后向量化查询前 1000 token。向量 API 失败或超时用空向量继续词法检索。向量与后面的重排分别使用 recallTimeoutMs。
 4. 对每条记忆算词法、语义、强度、重要性、激活、熟悉度和情绪关联；词法命中或语义超过阈值的才入候选。
 5. 融合排名，取 candidates；rerank 开启且候选多于一个时让快模型排列候选 ID，仅给予有限加权，不完全替代原分数。
 6. 贪心选择，每选一条，按摘要重叠降低其他相似条目的分数。
@@ -225,8 +225,8 @@ Runtime 在第四层已启动并结束，且有产生文字、用过工具或选
 3. system：基础规则（prompts.system 覆盖或文件）+ persona，合并先截至 4000 token。
 4. system 继续添加 Project：agent 根目录、workspace、memory 路径、targets 别名、Skills 名称/简介/路径，最多 5000 token。
 5. system 继续添加 Style：日常句数/字数与全部表达偏好，再按 layer3Tokens/stateTokens 预留截取。
-6. messages 第一条 user 是带标签的历史经历文本。各事件在文本内标来源、类型和时间；不会把全部历史逐条还原成模型 assistant/tool 角色。
-7. 第二条 user 是召回记忆 JSON、当前状态 JSON 和“处理最新触发事件”提示。状态按 stateTokens 截取，整体背景受 layer3Tokens 减 system 的余量限制。
+6. messages 第一条 user 是标注为参考资料的召回记忆与可读状态背景，不含内部状态账本。
+7. 随后是较早摘要、剩余历史原文（用户为 user、已生成回复为 assistant），本轮触发仅出现一次并放到最后。历史工具保留为标注的参考观察，不伪造缺少配对的原生工具消息。状态按 stateTokens 截取，整体背景仍受 layer3Tokens 预算限制。
 8. 本轮 ready 图片额外作为 user 多模态消息加入。ContextBundle 另传 inputText、target 和 memoryIds 供执行器/后台使用。
 
 内部事件在历史文本标“内部事件，并非用户发言”，实际消息包装仍为 user，不伪造模型已经说过一句话。系统人格由我们提供；没有叠加 Pi 自己的编程工作人格。
@@ -386,3 +386,15 @@ Telegram 收到 message 后，在入站允许列表检查之前更新 `telegram-
 模型 protocol 默认 responses。PiExecutor 选择 Pi 的 openai-responses 或 openai-completions 适配器，继续使用相同的工具回调、断句和取消信号；请求快照记录 protocol。OpenAIModels 的辅助 JSON 和摘要也按槽位选择接口，向量保持 embeddings。Responses 显式 store:false，由本地传入完整上下文，跨轮仍是全新执行。协议错误不会自动降级或重试为另一种协议，避免静默改变推理能力。
 
 上下文删除走独立管理接口，仅 unlink 指定请求文件或本轮快照，检查 agent/run 归属、文件名、符号链接及运行状态。它不调用 eraseHistory 或 clearHistorySummary；历史删除也不调用此接口。
+
+### 上下文的对话顺序与状态投影（当前实现）
+
+ContextBuilder 仍先调用 History.view 完成必要压缩，随后 History.messages 使用同一摘要检查点组织数组：记忆与状态参考背景 → 较早摘要 → 剩余 user/assistant 原文 → 本轮触发（只出现一次）→ 本轮附件。图片预算导致再次压缩时重建近期消息。layer2.history 快照仍保留原有完整文本视图，便于检查压缩。
+
+历史工具调用、结果和内部事件保留时间、来源及事件标签，作为 user 角色的参考材料，不伪造缺少配对的原生工具调用。PiExecutor 为历史 assistant 文本生成 SDK 所需的消息结构，本轮实时工具循环不变。
+
+state-context.ts 只映射可读心情、情绪、驱动力、上轮原因、此前念头/关注和本渠道交流间隔；状态文件仍保留 activation 及内部时间、编号供程序使用。风格数字改为软上限，不要求凑句数或主动讲旧事。
+
+查询优先本轮输入，参考近期用户输入，不再被助手分句占满；成功的查询句替代整段材料，空查询直接跳过自动召回。查询默认等 8 秒，向量查询与重排分别默认等 8 秒，失败仍回退。不会凭关键词另建闲聊/工作分类器。
+
+手动向量化复用 MemoryService.sync(true)，进度保存在该 agent 的 MemoryService 中；单条错误计数后继续，已有有效向量跳过。API 可选择后台运行，运行关闭时先取消并等待该后台任务结束再关闭数据库。

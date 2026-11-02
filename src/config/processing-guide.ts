@@ -108,7 +108,7 @@ const stages: Record<string, ProcessingGuide> = {
   },
   style: {
     steps: [
-      "ContextBuilder 在每轮开始读取有效 style 配置，写成 system 中的 [Style] 段。开头是“日常优先N句、约M字；复杂交付按需展开”。",
+      "ContextBuilder 在每轮开始读取有效 style 配置，写成 system 中的 [Style] 段。开头说明日常通常一两句；句数、字数、段数和主动提旧事数量是软上限，不要求达到。复杂交付按需展开。",
       "warmth、humor、directness、restraint、emotionExpression 小于 0.34 写“较少”，小于 0.67 写“适中”，其余写“较强”；其他字段使用数值或 true/false 写入。这里没有另一次场景判断 API。",
       "主模型结合完整背景决定怎样表达。程序不根据这几个数字裁剪已生成回复，也不为口头禅或重复旧事维护严格计数；最终发送拆分另由第四层和 delivery 处理。",
     ],
@@ -213,9 +213,9 @@ const stages: Record<string, ProcessingGuide> = {
 };
 const query: ProcessingGuide = {
   steps: [
-    "ContextBuilder 从第二层取最近 queryRecentMessages 条用户话、内部触发和 agent_reply，按历史格式串成材料；工具事件不计入。",
+    "ContextBuilder 将本轮输入放在查询材料开头，预留约七成 queryInputTokens；近期用户话和内部触发补充指代背景，助手分句和工具不计入。",
     "recall 以这份材料做缓存键。query 开启且缓存不可用时，把开头 queryInputTokens 个 token 交给 query 模型，system 使用 prompts.query 或默认“最多三条查找旧事的查询”。",
-    "取返回 queries 的前 queryDirections 条，合成一个查询；它们不是多次独立检索。成功结果只缓存在本进程，queryCacheSeconds 后失效。失败或超过 queryTimeoutMs 就用原材料。",
+    "取返回 queries 的前 queryDirections 条合成一个查询，不再拼回整段对话；空数组表示本轮无需召回旧事。它们不是多次独立检索。成功结果只缓存在本进程，queryCacheSeconds 后失效。失败或超过 queryTimeoutMs 就用原材料。",
     "search 再把查询开头最多 1000 token 交给 embedding，把结果用于语义比较；词法匹配也用查询文本。查询句本身不直接替换主模型历史，只有最终回忆进入 [Recalled memories]。",
   ],
   code: [

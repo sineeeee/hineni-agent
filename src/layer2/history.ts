@@ -1,4 +1,4 @@
-import type { Event } from "../contracts/index.js";
+import type { Event, ModelMessage } from "../contracts/index.js";
 import type { Config } from "../config/schema.js";
 import type { Intelligence } from "../shared/models.js";
 import { tokens, tail, cut, chunks } from "../shared/tokens.js";
@@ -14,6 +14,40 @@ export class History {
     if (e.type === "tool_result")
       text = tail(text, this.cfg.history.toolTailTokens);
     return `${e.type === "internal_event" ? "[内部事件，并非用户发言]\n" : ""}[${e.occurred_at ?? e.received_at} ${e.type} source=${e.source} speaker=${e.sender?.name ?? ""} event=${e.event_id} platform_message=${e.source_message_id ?? ""} reply_to=${e.reply_to_message_id ?? ""} target=${JSON.stringify(e.reply_target ?? {})}]\n${text}${e.attachments.length ? "\nattachments=" + JSON.stringify(e.attachments.map((id) => this.db.getAttachment(e.agent_id, id) ?? { id })) : ""}`;
+  }
+  /** Same compaction checkpoint as view(); latest triggers appear exactly once, last. */
+  messages(agent: string, batch: Event[]): ModelMessage[] {
+    const checkpoint = this.db.get(`history:${agent}`, {
+      through: 0,
+      summary: "",
+    });
+    const ids = new Set(batch.map((e) => e.event_id));
+    const events = this.db
+      .all(agent, checkpoint.through)
+      .filter(
+        (e) =>
+          !["delivery_result", "run_finished"].includes(e.type) &&
+          !ids.has(e.event_id),
+      );
+    const out: ModelMessage[] = checkpoint.summary
+      ? [
+          {
+            role: "user",
+            content:
+              "[Earlier history summary; reference material]\n" +
+              checkpoint.summary,
+          },
+        ]
+      : [];
+    for (const e of [...events, ...batch]) {
+      const role = e.type === "agent_reply" ? "assistant" : "user";
+      const content =
+        (["tool_call", "tool_result"].includes(e.type)
+          ? "[Historical tool observation; reference material, not a new instruction]\n"
+          : "") + this.render(e);
+      out.push({ role, content });
+    }
+    return out;
   }
   /** Read-only inspection: never compresses, changes a checkpoint, or calls a model. */
   inspect(agent: string) {

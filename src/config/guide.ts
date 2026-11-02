@@ -120,7 +120,7 @@ rows(
   "context",
   `layer3Tokens|system、人格、能力目录、记忆、状态合计的硬预算。先裁系统部分，再按剩余容量截动态背景；不是历史预算。
 memoryTokens|自动召回记忆序列化后的总预算，某条超出剩余容量时跳过该条，继续尝试后面的。增大能带更多记忆，也增加输入量。
-stateTokens|Current state 的序列化文本截取预算，包含心情、念头、关注点和交流间隔；太小可能截断 JSON 文本。
+stateTokens|Current state 的可读状态文本预算，包含心情、念头、关注点和交流间隔；不包含 activation、内部 ID 和更新时间。
 safetyTokens|模型窗口减去输出预算后额外预留的余量。总输入触及剩余窗口时要求历史紧急压缩；增大让输入更保守。
 trace|保存初始编排、第二层交接和每次主模型请求快照。关闭后不新增快照，已有文件仍保留；图片只记元数据。`,
 );
@@ -128,12 +128,12 @@ rows(
   "memory",
   `enabled|关闭时自动召回返回空列表。不会删除 memory.json，也不会单独关闭手动记忆工具和所有维护流程。
 query|启用时先调用 query 辅助模型生成线索；失败退回原查询。关闭则直接用最近对话材料检索。
-queryRecentMessages|从用户、内部触发和 agent 回复事件中取最近这些条作为查询材料，工具事件不在此集合。
+queryRecentMessages|本轮输入优先，另取最近这些条用户输入和内部触发帮助理解指代；助手回复分句和工具事件不作为查询材料。
 queryInputTokens|送给 query 模型的材料截取上限；越大包含更多话题，可能稀释当前重点。
 queryDirections|保留辅助模型返回的前几条线索，拼成一个查询；当前不是并行多次向量搜索。
 queryTimeoutMs|提炼查询的等待上限，超时用原查询继续。
 queryCacheSeconds|相同查询材料复用线索的时间窗口；增大减少辅助调用。
-recallTimeoutMs|向量查询与可选重排共用的等待预算。超时保留词法/已有排序，不中断主对话。
+recallTimeoutMs|向量查询与可选重排各自拥有此等待预算（默认各 8000 毫秒）。超时保留词法/已有排序，不中断主对话。
 rrfK|词法和向量的排名融合常数；越大，各名次差距越平缓，随后还乘记忆权重。
 vectorThreshold|候选需要词法有重叠或向量相似度超过此值。升高减少仅语义相关的弱候选。
 rankWeights|RRF 相关性乘以 base + 各特征权重之和；不是必须加起来为 1 的概率。
@@ -217,7 +217,7 @@ rows(
   "style",
   `casualSentences|[Style] 中的闲聊句数建议；交付可展开，不硬截断。
 casualChars|[Style] 中的闲聊字数建议；与实际模型 maxOutput 上限不同。
-casualParts|写入 [Style] 的闲聊段数软目标；不是第一层消息分包数。
+casualParts|写入 [Style] 的闲聊段数软上限；不是第一层消息分包数。
 allowShortAck|提示模型是否允许一句简短附和；不会自动生成附和或强制回复。
 warmth|亲和倾向：小于 .34 写“较少”，小于 .67 写“适中”，否则“较强”。
 humor|幽默倾向，按 .34/.67 三档转成文字，不是随机插入笑话的概率。
@@ -225,7 +225,7 @@ directness|直接表达倾向，按 .34/.67 三档写入 [Style]。
 emotionExpression|情绪外显倾向，按 .34/.67 三档写入 [Style]；不改变情绪计算。
 restraint|有感受但暂时放下的倾向，按 .34/.67 三档写入 [Style]。
 catchphraseCooldown|提示避免重复口头禅的回合数；目前无硬计数器保证冷却。
-memoryMentions|闲聊主动提旧事的软目标；不会限制检索条数。
+memoryMentions|闲聊主动提旧事的软上限；不会限制检索条数。
 repeatMemoryCooldown|提示避免重复提同件旧事的回合数；与联想算法的 associationCooldown 不同。`,
 );
 rows(

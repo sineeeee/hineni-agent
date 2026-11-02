@@ -125,3 +125,7 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 ### 删除上下文快照
 
 `DELETE /v1/agents/:agent/runs/:run/context`，使用管理认证。请求 `{ "mode": "selected", "request": "0.json" }` 删除一份请求；request 为 null 删除初始编排快照；`{ "mode": "all" }` 删除本轮全部快照。返回 deleted_snapshots。运行中返回 409；不存在的请求返回 404。只删除 .runtime 内指定快照文件，保留数据库轮次、聊天记录和摘要。
+
+### 记忆向量化进度
+
+`POST /v1/agents/:agent/memory/reindex` 默认继续等待维护完成；`{"background":true}` 返回 202 并后台执行。重复启动共用已有维护。`GET /v1/agents/:agent/memory/index-status` 返回 status（idle/running/completed/failed）、total、processed、ready、pending、failed、current_id、error、started_at、finished_at。进度为当前进程状态，ready/pending 由实际索引核对。两个接口均要求管理认证并限定 agent。

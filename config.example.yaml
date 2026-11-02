@@ -50,9 +50,9 @@ memory:
   enabled: true
   queryRecentMessages: 8
   queryInputTokens: 2500
-  queryTimeoutMs: 2500
+  queryTimeoutMs: 8000
   queryCacheSeconds: 60
-  recallTimeoutMs: 1500
+  recallTimeoutMs: 8000
   rrfK: 60
   vectorThreshold: 0.18
   diversityPenalty: 0.15

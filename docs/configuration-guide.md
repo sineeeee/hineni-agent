@@ -195,18 +195,18 @@ memory:
   debounceSeconds: 120
 ```
 
-文件静置至少 120 秒后，在下一次约 300 秒间隔的检查中维护；不是准确 120 秒触发。daily 定时任务仍存在。手动调用 `POST /v1/agents/main/memory/reindex` 也可维护；接口返回条目数不表示每条 API 都成功，失败写日志。
+文件静置至少 120 秒后，在下一次约 300 秒间隔的检查中维护；不是准确 120 秒触发。daily 定时任务仍存在。手动调用 `POST /v1/agents/main/memory/reindex` 也可维护；接口同时返回 ready、pending 和 failed，失败写日志；工作台按钮可后台执行并查看进度。
 
 ### 召回质量与等待
 
-`queryRecentMessages=8`：取最近用户/内部/assistant 事件作为查询材料。`queryDirections=3`：查询模型最多返回三段线索，当前实现是拼进同一查询，而不是三条独立向量查询。
+`queryRecentMessages=8`：取近期用户/内部事件帮助理解本轮输入，不取助手的分句回复。`queryDirections=3`：查询模型最多返回三段线索，当前实现是合成同一查询，替代原材料，而不是三条独立向量查询。
 
-`queryTimeoutMs=2500` 控制查询扩展，`recallTimeoutMs=1500` 是随后向量查询和重排共用的预算。希望更充分用上语义检索时可以增加等待：
+`queryTimeoutMs=8000` 控制查询提炼，`recallTimeoutMs=8000` 是向量查询和重排各自的预算。默认如下，可以按服务速度调整：
 
 ```yaml
 memory:
-  queryTimeoutMs: 4000
-  recallTimeoutMs: 6000
+  queryTimeoutMs: 8000
+  recallTimeoutMs: 8000
 ```
 
 代价是回复可能变慢。超时退回原查询、词法和已有排名，不代表整轮失败。没有向量的记忆仍能词法检索。当前词法是轻量字词重叠，不是完整 BM25；向量是本地余弦检索，不依赖单独向量库服务。
@@ -481,3 +481,8 @@ node --input-type=module -e 'import fs from "node:fs"; import YAML from "yaml"; 
 Telegram 启动连接最多等待约 30 秒；无法连接时渠道标记 failed，工作台和调度仍可启动。此时主动事件仍会被处理，但发往 Telegram 的消息可能无法送达；网络恢复后重启服务重新连接。
 
 接口格式参考 [OpenAI Responses 迁移说明](https://developers.openai.com/api/docs/guides/migrate-to-responses)。协议只决定请求表达，不改变 Hineni 的四层分工。
+
+
+召回查询的 queryTimeoutMs 默认 8000；recallTimeoutMs 默认 8000，向量查询和重排分别计时。已有个人配置中的明确值继续优先，需自行保存并重启调整。queryRecentMessages 现在只参考用户输入与内部触发；本轮输入优先，助手分句不占条数。查询模型可返回空 queries 跳过旧事召回。
+
+stateTokens 控制给主模型的可读状态背景，不再把 state.json 整份塞入。activation、内部 ID 和更新时间留在文件供程序计算。casualSentences/casualChars/casualParts/memoryMentions 映射成闲聊软上限，不是每次必须达到的目标。
