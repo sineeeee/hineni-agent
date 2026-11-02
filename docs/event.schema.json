@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol_version": {
+      "default": 1,
+      "type": "number",
+      "const": 1
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "agent_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "incoming_message",
+        "internal_event",
+        "attachment_ready",
+        "attachment_failed",
+        "tool_call",
+        "tool_result",
+        "agent_reply",
+        "outbound_action",
+        "run_finished",
+        "delivery_result"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+    },
+    "text": {
+      "default": "",
+      "type": "string",
+      "maxLength": 2000000
+    },
+    "reply_target": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "conversation": {
+          "type": "string"
+        },
+        "thread": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "private",
+            "group"
+          ]
+        }
+      },
+      "required": [
+        "channel",
+        "conversation"
+      ],
+      "additionalProperties": false
+    },
+    "sender": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent",
+            "system"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "source_message_id": {
+      "type": "string"
+    },
+    "reply_to_message_id": {
+      "type": "string"
+    },
+    "parent_event_id": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "attachments": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "data": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "protocol_version",
+    "event_id",
+    "agent_id",
+    "type",
+    "source",
+    "text",
+    "attachments",
+    "data"
+  ],
+  "additionalProperties": false
+}

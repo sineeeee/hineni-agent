@@ -1,0 +1,269 @@
+version: 1
+dataDir: data
+agentsDir: agents
+server:
+  host: 127.0.0.1
+  port: 8787
+  adminPort: 8788
+  tokenEnv: HINENI_TOKEN
+models:
+  main:
+    baseUrl: https://api.openai.com/v1
+    apiKeyEnv: OPENAI_API_KEY
+    name: gpt-4.1
+    contextWindow: 1047576
+    maxOutput: 8192
+    reasoning: off
+    compat: {}
+  fast:
+    baseUrl: https://api.openai.com/v1
+    apiKeyEnv: OPENAI_API_KEY
+    name: gpt-4.1-mini
+    contextWindow: 1047576
+    maxOutput: 2000
+    reasoning: off
+    compat: {}
+  embedding:
+    baseUrl: https://api.openai.com/v1
+    apiKeyEnv: OPENAI_API_KEY
+    name: text-embedding-3-small
+    contextWindow: 1047576
+    maxOutput: 1
+    reasoning: off
+    compat: {}
+history:
+  triggerTokens: 600000
+  targetTokens: 350000
+  summaryTokens: 12000
+  toolTailTokens: 200
+  pollMs: 500
+context:
+  layer3Tokens: 32000
+  memoryTokens: 20000
+  stateTokens: 1000
+  safetyTokens: 16384
+  trace: true
+memory:
+  enabled: true
+  queryRecentMessages: 8
+  queryInputTokens: 2500
+  queryTimeoutMs: 2500
+  queryCacheSeconds: 60
+  recallTimeoutMs: 1500
+  rrfK: 60
+  vectorThreshold: 0.18
+  diversityPenalty: 0.15
+  summaryTokens: 160
+  temporalNeighbors: 2
+  temporalWindowHours: 24
+  associationTokens: 250
+  activationEnabled: true
+  activationMaxItems: 12
+  emotionHalfLifeDays: 7
+  descriptionTokens: 120
+  debounceSeconds: 120
+  maintenanceTimeoutMs: 60000
+  maintenanceAttempts: 3
+  maintenanceBatchItems: 20
+  toolsEnabled: true
+  toolPageTokens: 3000
+  toolReadTokens: 4000
+  toolPageItems: 10
+  reviewOverlap: 4
+  smallDetailProbability: 0.15
+  smallDetailMax: 1
+  noveltyAttention: true
+  query: true
+  rerank: true
+  searchDescription: true
+  maxItems: 12
+  detailsItems: 6
+  detailsTokens: 2000
+  candidates: 40
+  queryDirections: 3
+  baseHalfLifeDays: 30
+  importanceMultiplier: 2
+  reinforcementGain: 0.2
+  activationHalfLifeMinutes: 30
+  activationTtlHours: 3
+  associationProbability: 0.2
+  associationCooldown: 8
+  pollSeconds: 300
+  embeddingUpdate: daily
+  sleepCron: 0 3 * * *
+  reviewEnabled: true
+  reviewBatchTokens: 12000
+  maxReviewItems: 8
+  chunkTokens: 800
+  chunkOverlap: 80
+  rankWeights:
+    base: 0.5
+    strength: 0.15
+    importance: 0.15
+    familiarity: 0.05
+    emotion: 0.05
+    activation: 0.1
+state:
+  enabled: true
+  emotionLabels:
+    - 愉快
+    - 安心
+    - 好奇
+    - 担忧
+    - 失落
+    - 烦躁
+  eventSensitivity: 1
+  surpriseMax: 1.5
+  repeatedStimulusMultiplier: 0.5
+  reportChars: 120
+  thoughtContextItems: 1
+  thoughtContextTokens: 300
+  thoughtHalfLifeHours: 6
+  focusMax: 2
+  focusTtlHours: 24
+  baseline: 70
+  moodHalfLifeHours: 12
+  emotionHalfLifeMinutes: 90
+  moodDeltaLimit: 3
+  dimensionDeltaLimit: 5
+  inputTokens: 6000
+  timeoutMs: 10000
+  thoughtsMax: 3
+  thoughtTtlHours: 24
+  gap: true
+style:
+  casualParts: 3
+  emotionExpression: 0.35
+  restraint: 0.6
+  catchphraseCooldown: 5
+  memoryMentions: 1
+  repeatMemoryCooldown: 8
+  allowShortAck: true
+  casualChars: 150
+  casualSentences: 3
+  warmth: 0.6
+  humor: 0.3
+  directness: 0.7
+runtime:
+  mcpConnectTimeoutMs: 30000
+  shellMaxTimeoutMs: 1800000
+  backend: pi
+  maxRounds: 50
+  timeoutMs: 300000
+  runTimeoutMs: 3600000
+  toolTimeoutMs: 120000
+  toolsEnabled: true
+  skillsEnabled: true
+  mcpEnabled: true
+  webEnabled: true
+  cancelGraceMs: 5000
+  maxToolChars: 16000
+delivery:
+  typing: true
+  initialDelayMs: 0
+  partIntervalMs: 0
+  split: platform
+  attempts: 3
+scheduler:
+  enabled: true
+  script: schedule.ts
+  timezone: Asia/Shanghai
+  randomChat: true
+  randomMinMinutes: 60
+  randomMaxMinutes: 180
+  activeStart: 8
+  activeEnd: 22
+  dreamCron: 0 4 * * 0
+  dreamEnabled: true
+prompts: {}
+drives:
+  curiosity:
+    enabled: true
+    baseline: 55
+    halfLifeHours: 6
+    sensitivity: 1
+    min: 0
+    max: 100
+  social:
+    enabled: true
+    baseline: 40
+    halfLifeHours: 6
+    sensitivity: 1
+    min: 0
+    max: 100
+  responsibility:
+    enabled: true
+    baseline: 50
+    halfLifeHours: 12
+    sensitivity: 1
+    min: 0
+    max: 100
+  introspection:
+    enabled: true
+    baseline: 30
+    halfLifeHours: 12
+    sensitivity: 1
+    min: 0
+    max: 100
+  missing:
+    enabled: true
+    baseline: 20
+    halfLifeHours: 12
+    sensitivity: 1
+    min: 0
+    max: 100
+  closeness:
+    enabled: true
+    baseline: 20
+    halfLifeHours: 12
+    sensitivity: 1
+    min: 0
+    max: 100
+  fatigue:
+    enabled: true
+    baseline: 10
+    halfLifeHours: 3
+    sensitivity: 1
+    min: 0
+    max: 100
+  stress:
+    enabled: true
+    baseline: 10
+    halfLifeHours: 6
+    sensitivity: 1
+    min: 0
+    max: 100
+  joy:
+    enabled: true
+    baseline: 60
+    halfLifeHours: 6
+    sensitivity: 1
+    min: 0
+    max: 100
+channels:
+  - id: local
+    type: webhook
+    enabled: true
+    allowedChats: []
+    maxFileBytes: 20971520
+  - id: telegram
+    type: telegram
+    enabled: true
+    tokenEnv: TELEGRAM_BOT_TOKEN
+    allowedChats: []
+    maxFileBytes: 20971520
+agents:
+  - id: main
+    name: Hineni
+    enabled: true
+    defaultTarget:
+      channel: local
+      conversation: owner
+    targets:
+      local:
+        channel: local
+        conversation: owner
+    routes: []
+    skills: []
+    overrides: {}
+mcp: []

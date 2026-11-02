@@ -1,0 +1,1794 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "default": 1,
+      "type": "number",
+      "const": 1
+    },
+    "dataDir": {
+      "default": "data",
+      "type": "string"
+    },
+    "agentsDir": {
+      "default": "agents",
+      "type": "string"
+    },
+    "server": {
+      "default": {
+        "host": "127.0.0.1",
+        "port": 8787,
+        "adminPort": 8788,
+        "tokenEnv": "HINENI_TOKEN"
+      },
+      "type": "object",
+      "properties": {
+        "host": {
+          "default": "127.0.0.1",
+          "type": "string"
+        },
+        "port": {
+          "default": 8787,
+          "type": "number",
+          "minimum": 1
+        },
+        "adminPort": {
+          "default": 8788,
+          "type": "number",
+          "minimum": 1
+        },
+        "tokenEnv": {
+          "default": "HINENI_TOKEN",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "port",
+        "adminPort",
+        "tokenEnv"
+      ],
+      "additionalProperties": false
+    },
+    "models": {
+      "default": {
+        "main": {
+          "baseUrl": "https://api.openai.com/v1",
+          "apiKeyEnv": "OPENAI_API_KEY",
+          "name": "gpt-4.1",
+          "contextWindow": 1047576,
+          "maxOutput": 8192,
+          "reasoning": "off",
+          "compat": {}
+        },
+        "fast": {
+          "baseUrl": "https://api.openai.com/v1",
+          "apiKeyEnv": "OPENAI_API_KEY",
+          "name": "gpt-4.1-mini",
+          "contextWindow": 1047576,
+          "maxOutput": 2000,
+          "reasoning": "off",
+          "compat": {}
+        },
+        "embedding": {
+          "baseUrl": "https://api.openai.com/v1",
+          "apiKeyEnv": "OPENAI_API_KEY",
+          "name": "text-embedding-3-small",
+          "contextWindow": 1047576,
+          "maxOutput": 1,
+          "reasoning": "off",
+          "compat": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "main": {
+          "default": {
+            "baseUrl": "https://api.openai.com/v1",
+            "apiKeyEnv": "OPENAI_API_KEY",
+            "name": "gpt-4.1",
+            "contextWindow": 1047576,
+            "maxOutput": 8192,
+            "reasoning": "off",
+            "compat": {}
+          },
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "baseUrl",
+            "apiKeyEnv",
+            "name",
+            "contextWindow",
+            "maxOutput",
+            "reasoning",
+            "compat"
+          ],
+          "additionalProperties": false
+        },
+        "fast": {
+          "default": {
+            "baseUrl": "https://api.openai.com/v1",
+            "apiKeyEnv": "OPENAI_API_KEY",
+            "name": "gpt-4.1-mini",
+            "contextWindow": 1047576,
+            "maxOutput": 2000,
+            "reasoning": "off",
+            "compat": {}
+          },
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "baseUrl",
+            "apiKeyEnv",
+            "name",
+            "contextWindow",
+            "maxOutput",
+            "reasoning",
+            "compat"
+          ],
+          "additionalProperties": false
+        },
+        "embedding": {
+          "default": {
+            "baseUrl": "https://api.openai.com/v1",
+            "apiKeyEnv": "OPENAI_API_KEY",
+            "name": "text-embedding-3-small",
+            "contextWindow": 1047576,
+            "maxOutput": 1,
+            "reasoning": "off",
+            "compat": {}
+          },
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "baseUrl",
+            "apiKeyEnv",
+            "name",
+            "contextWindow",
+            "maxOutput",
+            "reasoning",
+            "compat"
+          ],
+          "additionalProperties": false
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": false
+        },
+        "maintenance": {
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": false
+        },
+        "emotion": {
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": false
+        },
+        "rerank": {
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "main",
+        "fast",
+        "embedding"
+      ],
+      "additionalProperties": false
+    },
+    "history": {
+      "default": {
+        "triggerTokens": 600000,
+        "targetTokens": 350000,
+        "summaryTokens": 12000,
+        "toolTailTokens": 200,
+        "pollMs": 500
+      },
+      "type": "object",
+      "properties": {
+        "triggerTokens": {
+          "default": 600000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "targetTokens": {
+          "default": 350000,
+          "type": "number",
+          "minimum": 500
+        },
+        "summaryTokens": {
+          "default": 12000,
+          "type": "number",
+          "minimum": 100
+        },
+        "toolTailTokens": {
+          "default": 200,
+          "type": "number",
+          "minimum": 20
+        },
+        "pollMs": {
+          "default": 500,
+          "type": "number",
+          "minimum": 50
+        }
+      },
+      "required": [
+        "triggerTokens",
+        "targetTokens",
+        "summaryTokens",
+        "toolTailTokens",
+        "pollMs"
+      ],
+      "additionalProperties": false
+    },
+    "context": {
+      "default": {
+        "layer3Tokens": 32000,
+        "memoryTokens": 20000,
+        "stateTokens": 1000,
+        "safetyTokens": 16384,
+        "trace": true
+      },
+      "type": "object",
+      "properties": {
+        "layer3Tokens": {
+          "default": 32000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "memoryTokens": {
+          "default": 20000,
+          "type": "number",
+          "minimum": 200
+        },
+        "stateTokens": {
+          "default": 1000,
+          "type": "number",
+          "minimum": 100
+        },
+        "safetyTokens": {
+          "default": 16384,
+          "type": "number",
+          "minimum": 100
+        },
+        "trace": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "layer3Tokens",
+        "memoryTokens",
+        "stateTokens",
+        "safetyTokens",
+        "trace"
+      ],
+      "additionalProperties": false
+    },
+    "memory": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "queryRecentMessages": {
+          "default": 8,
+          "type": "number",
+          "minimum": 1
+        },
+        "queryInputTokens": {
+          "default": 2500,
+          "type": "number",
+          "minimum": 100
+        },
+        "queryTimeoutMs": {
+          "default": 2500,
+          "type": "number",
+          "minimum": 100
+        },
+        "queryCacheSeconds": {
+          "default": 60,
+          "type": "number",
+          "minimum": 0
+        },
+        "recallTimeoutMs": {
+          "default": 1500,
+          "type": "number",
+          "minimum": 100
+        },
+        "rrfK": {
+          "default": 60,
+          "type": "number",
+          "minimum": 1
+        },
+        "vectorThreshold": {
+          "default": 0.18,
+          "type": "number",
+          "minimum": 0
+        },
+        "diversityPenalty": {
+          "default": 0.15,
+          "type": "number",
+          "minimum": 0
+        },
+        "summaryTokens": {
+          "default": 160,
+          "type": "number",
+          "minimum": 20
+        },
+        "temporalNeighbors": {
+          "default": 2,
+          "type": "number",
+          "minimum": 0
+        },
+        "temporalWindowHours": {
+          "default": 24,
+          "type": "number",
+          "minimum": 0
+        },
+        "associationTokens": {
+          "default": 250,
+          "type": "number",
+          "minimum": 20
+        },
+        "activationEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "activationMaxItems": {
+          "default": 12,
+          "type": "number",
+          "minimum": 1
+        },
+        "emotionHalfLifeDays": {
+          "default": 7,
+          "type": "number",
+          "minimum": 1
+        },
+        "descriptionTokens": {
+          "default": 120,
+          "type": "number",
+          "minimum": 10
+        },
+        "debounceSeconds": {
+          "default": 120,
+          "type": "number",
+          "minimum": 0
+        },
+        "maintenanceTimeoutMs": {
+          "default": 60000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "maintenanceAttempts": {
+          "default": 3,
+          "type": "number",
+          "minimum": 1
+        },
+        "maintenanceBatchItems": {
+          "default": 20,
+          "type": "number",
+          "minimum": 1
+        },
+        "toolsEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "toolPageTokens": {
+          "default": 3000,
+          "type": "number",
+          "minimum": 100
+        },
+        "toolReadTokens": {
+          "default": 4000,
+          "type": "number",
+          "minimum": 100
+        },
+        "toolPageItems": {
+          "default": 10,
+          "type": "number",
+          "minimum": 1
+        },
+        "reviewOverlap": {
+          "default": 4,
+          "type": "number",
+          "minimum": 0
+        },
+        "smallDetailProbability": {
+          "default": 0.15,
+          "type": "number",
+          "minimum": 0
+        },
+        "smallDetailMax": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0
+        },
+        "noveltyAttention": {
+          "default": true,
+          "type": "boolean"
+        },
+        "query": {
+          "default": true,
+          "type": "boolean"
+        },
+        "rerank": {
+          "default": true,
+          "type": "boolean"
+        },
+        "searchDescription": {
+          "default": true,
+          "type": "boolean"
+        },
+        "maxItems": {
+          "default": 12,
+          "type": "number",
+          "minimum": 1
+        },
+        "detailsItems": {
+          "default": 6,
+          "type": "number",
+          "minimum": 0
+        },
+        "detailsTokens": {
+          "default": 2000,
+          "type": "number",
+          "minimum": 20
+        },
+        "candidates": {
+          "default": 40,
+          "type": "number",
+          "minimum": 1
+        },
+        "queryDirections": {
+          "default": 3,
+          "type": "number",
+          "minimum": 1
+        },
+        "baseHalfLifeDays": {
+          "default": 30,
+          "type": "number",
+          "minimum": 1
+        },
+        "importanceMultiplier": {
+          "default": 2,
+          "type": "number",
+          "minimum": 0
+        },
+        "reinforcementGain": {
+          "default": 0.2,
+          "type": "number",
+          "minimum": 0
+        },
+        "activationHalfLifeMinutes": {
+          "default": 30,
+          "type": "number",
+          "minimum": 1
+        },
+        "activationTtlHours": {
+          "default": 3,
+          "type": "number",
+          "minimum": 1
+        },
+        "associationProbability": {
+          "default": 0.2,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "associationCooldown": {
+          "default": 8,
+          "type": "number",
+          "minimum": 0
+        },
+        "pollSeconds": {
+          "default": 300,
+          "type": "number",
+          "minimum": 10
+        },
+        "embeddingUpdate": {
+          "default": "daily",
+          "type": "string",
+          "enum": [
+            "daily",
+            "debounced"
+          ]
+        },
+        "sleepCron": {
+          "default": "0 3 * * *",
+          "type": "string"
+        },
+        "reviewEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "reviewBatchTokens": {
+          "default": 12000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "maxReviewItems": {
+          "default": 8,
+          "type": "number",
+          "minimum": 1
+        },
+        "chunkTokens": {
+          "default": 800,
+          "type": "number",
+          "minimum": 100
+        },
+        "chunkOverlap": {
+          "default": 80,
+          "type": "number",
+          "minimum": 0
+        },
+        "rankWeights": {
+          "default": {
+            "base": 0.5,
+            "strength": 0.15,
+            "importance": 0.15,
+            "familiarity": 0.05,
+            "emotion": 0.05,
+            "activation": 0.1
+          },
+          "type": "object",
+          "properties": {
+            "base": {
+              "default": 0.5,
+              "type": "number",
+              "minimum": 0
+            },
+            "strength": {
+              "default": 0.15,
+              "type": "number",
+              "minimum": 0
+            },
+            "importance": {
+              "default": 0.15,
+              "type": "number",
+              "minimum": 0
+            },
+            "familiarity": {
+              "default": 0.05,
+              "type": "number",
+              "minimum": 0
+            },
+            "emotion": {
+              "default": 0.05,
+              "type": "number",
+              "minimum": 0
+            },
+            "activation": {
+              "default": 0.1,
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "base",
+            "strength",
+            "importance",
+            "familiarity",
+            "emotion",
+            "activation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "enabled",
+        "queryRecentMessages",
+        "queryInputTokens",
+        "queryTimeoutMs",
+        "queryCacheSeconds",
+        "recallTimeoutMs",
+        "rrfK",
+        "vectorThreshold",
+        "diversityPenalty",
+        "summaryTokens",
+        "temporalNeighbors",
+        "temporalWindowHours",
+        "associationTokens",
+        "activationEnabled",
+        "activationMaxItems",
+        "emotionHalfLifeDays",
+        "descriptionTokens",
+        "debounceSeconds",
+        "maintenanceTimeoutMs",
+        "maintenanceAttempts",
+        "maintenanceBatchItems",
+        "toolsEnabled",
+        "toolPageTokens",
+        "toolReadTokens",
+        "toolPageItems",
+        "reviewOverlap",
+        "smallDetailProbability",
+        "smallDetailMax",
+        "noveltyAttention",
+        "query",
+        "rerank",
+        "searchDescription",
+        "maxItems",
+        "detailsItems",
+        "detailsTokens",
+        "candidates",
+        "queryDirections",
+        "baseHalfLifeDays",
+        "importanceMultiplier",
+        "reinforcementGain",
+        "activationHalfLifeMinutes",
+        "activationTtlHours",
+        "associationProbability",
+        "associationCooldown",
+        "pollSeconds",
+        "embeddingUpdate",
+        "sleepCron",
+        "reviewEnabled",
+        "reviewBatchTokens",
+        "maxReviewItems",
+        "chunkTokens",
+        "chunkOverlap",
+        "rankWeights"
+      ],
+      "additionalProperties": false
+    },
+    "state": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "emotionLabels": {
+          "default": [
+            "愉快",
+            "安心",
+            "好奇",
+            "担忧",
+            "失落",
+            "烦躁"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "eventSensitivity": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0
+        },
+        "surpriseMax": {
+          "default": 1.5,
+          "type": "number",
+          "minimum": 0
+        },
+        "repeatedStimulusMultiplier": {
+          "default": 0.5,
+          "type": "number",
+          "minimum": 0
+        },
+        "reportChars": {
+          "default": 120,
+          "type": "number",
+          "minimum": 10
+        },
+        "thoughtContextItems": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0
+        },
+        "thoughtContextTokens": {
+          "default": 300,
+          "type": "number",
+          "minimum": 20
+        },
+        "thoughtHalfLifeHours": {
+          "default": 6,
+          "type": "number",
+          "minimum": 1
+        },
+        "focusMax": {
+          "default": 2,
+          "type": "number",
+          "minimum": 0
+        },
+        "focusTtlHours": {
+          "default": 24,
+          "type": "number",
+          "minimum": 1
+        },
+        "baseline": {
+          "default": 70,
+          "type": "number",
+          "minimum": 0
+        },
+        "moodHalfLifeHours": {
+          "default": 12,
+          "type": "number",
+          "minimum": 1
+        },
+        "emotionHalfLifeMinutes": {
+          "default": 90,
+          "type": "number",
+          "minimum": 1
+        },
+        "moodDeltaLimit": {
+          "default": 3,
+          "type": "number",
+          "minimum": 0
+        },
+        "dimensionDeltaLimit": {
+          "default": 5,
+          "type": "number",
+          "minimum": 0
+        },
+        "inputTokens": {
+          "default": 6000,
+          "type": "number",
+          "minimum": 500
+        },
+        "timeoutMs": {
+          "default": 10000,
+          "type": "number",
+          "minimum": 100
+        },
+        "thoughtsMax": {
+          "default": 3,
+          "type": "number",
+          "minimum": 0
+        },
+        "thoughtTtlHours": {
+          "default": 24,
+          "type": "number",
+          "minimum": 1
+        },
+        "gap": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled",
+        "emotionLabels",
+        "eventSensitivity",
+        "surpriseMax",
+        "repeatedStimulusMultiplier",
+        "reportChars",
+        "thoughtContextItems",
+        "thoughtContextTokens",
+        "thoughtHalfLifeHours",
+        "focusMax",
+        "focusTtlHours",
+        "baseline",
+        "moodHalfLifeHours",
+        "emotionHalfLifeMinutes",
+        "moodDeltaLimit",
+        "dimensionDeltaLimit",
+        "inputTokens",
+        "timeoutMs",
+        "thoughtsMax",
+        "thoughtTtlHours",
+        "gap"
+      ],
+      "additionalProperties": false
+    },
+    "style": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "casualParts": {
+          "default": 3,
+          "type": "number",
+          "minimum": 1
+        },
+        "emotionExpression": {
+          "default": 0.35,
+          "type": "number",
+          "minimum": 0
+        },
+        "restraint": {
+          "default": 0.6,
+          "type": "number",
+          "minimum": 0
+        },
+        "catchphraseCooldown": {
+          "default": 5,
+          "type": "number",
+          "minimum": 0
+        },
+        "memoryMentions": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0
+        },
+        "repeatMemoryCooldown": {
+          "default": 8,
+          "type": "number",
+          "minimum": 0
+        },
+        "allowShortAck": {
+          "default": true,
+          "type": "boolean"
+        },
+        "casualChars": {
+          "default": 150,
+          "type": "number",
+          "minimum": 10
+        },
+        "casualSentences": {
+          "default": 3,
+          "type": "number",
+          "minimum": 1
+        },
+        "warmth": {
+          "default": 0.6,
+          "type": "number",
+          "minimum": 0
+        },
+        "humor": {
+          "default": 0.3,
+          "type": "number",
+          "minimum": 0
+        },
+        "directness": {
+          "default": 0.7,
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "casualParts",
+        "emotionExpression",
+        "restraint",
+        "catchphraseCooldown",
+        "memoryMentions",
+        "repeatMemoryCooldown",
+        "allowShortAck",
+        "casualChars",
+        "casualSentences",
+        "warmth",
+        "humor",
+        "directness"
+      ],
+      "additionalProperties": false
+    },
+    "runtime": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "mcpConnectTimeoutMs": {
+          "default": 30000,
+          "type": "number",
+          "minimum": 100
+        },
+        "shellMaxTimeoutMs": {
+          "default": 1800000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "backend": {
+          "default": "pi",
+          "type": "string",
+          "const": "pi"
+        },
+        "maxRounds": {
+          "default": 50,
+          "type": "number",
+          "minimum": 1
+        },
+        "timeoutMs": {
+          "default": 300000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "runTimeoutMs": {
+          "default": 3600000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "toolTimeoutMs": {
+          "default": 120000,
+          "type": "number",
+          "minimum": 1000
+        },
+        "toolsEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "skillsEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "mcpEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "webEnabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "cancelGraceMs": {
+          "default": 5000,
+          "type": "number",
+          "minimum": 100
+        },
+        "maxToolChars": {
+          "default": 16000,
+          "type": "number",
+          "minimum": 100
+        }
+      },
+      "required": [
+        "mcpConnectTimeoutMs",
+        "shellMaxTimeoutMs",
+        "backend",
+        "maxRounds",
+        "timeoutMs",
+        "runTimeoutMs",
+        "toolTimeoutMs",
+        "toolsEnabled",
+        "skillsEnabled",
+        "mcpEnabled",
+        "webEnabled",
+        "cancelGraceMs",
+        "maxToolChars"
+      ],
+      "additionalProperties": false
+    },
+    "delivery": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "typing": {
+          "default": true,
+          "type": "boolean"
+        },
+        "initialDelayMs": {
+          "default": 0,
+          "type": "number",
+          "minimum": 0
+        },
+        "partIntervalMs": {
+          "default": 0,
+          "type": "number",
+          "minimum": 0
+        },
+        "split": {
+          "default": "platform",
+          "type": "string",
+          "enum": [
+            "platform",
+            "paragraph",
+            "sentence"
+          ]
+        },
+        "attempts": {
+          "default": 3,
+          "type": "number",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "typing",
+        "initialDelayMs",
+        "partIntervalMs",
+        "split",
+        "attempts"
+      ],
+      "additionalProperties": false
+    },
+    "scheduler": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "script": {
+          "default": "schedule.ts",
+          "type": "string"
+        },
+        "timezone": {
+          "default": "Asia/Shanghai",
+          "type": "string"
+        },
+        "randomChat": {
+          "default": true,
+          "type": "boolean"
+        },
+        "randomMinMinutes": {
+          "default": 60,
+          "type": "number",
+          "minimum": 1
+        },
+        "randomMaxMinutes": {
+          "default": 180,
+          "type": "number",
+          "minimum": 1
+        },
+        "activeStart": {
+          "default": 8,
+          "type": "number",
+          "minimum": 0
+        },
+        "activeEnd": {
+          "default": 22,
+          "type": "number",
+          "minimum": 0
+        },
+        "dreamCron": {
+          "default": "0 4 * * 0",
+          "type": "string"
+        },
+        "dreamEnabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled",
+        "script",
+        "timezone",
+        "randomChat",
+        "randomMinMinutes",
+        "randomMaxMinutes",
+        "activeStart",
+        "activeEnd",
+        "dreamCron",
+        "dreamEnabled"
+      ],
+      "additionalProperties": false
+    },
+    "prompts": {
+      "default": {},
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "drives": {
+      "default": {
+        "curiosity": {
+          "enabled": true,
+          "baseline": 55,
+          "halfLifeHours": 6,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "social": {
+          "enabled": true,
+          "baseline": 40,
+          "halfLifeHours": 6,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "responsibility": {
+          "enabled": true,
+          "baseline": 50,
+          "halfLifeHours": 12,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "introspection": {
+          "enabled": true,
+          "baseline": 30,
+          "halfLifeHours": 12,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "missing": {
+          "enabled": true,
+          "baseline": 20,
+          "halfLifeHours": 12,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "closeness": {
+          "enabled": true,
+          "baseline": 20,
+          "halfLifeHours": 12,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "fatigue": {
+          "enabled": true,
+          "baseline": 10,
+          "halfLifeHours": 3,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "stress": {
+          "enabled": true,
+          "baseline": 10,
+          "halfLifeHours": 6,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        },
+        "joy": {
+          "enabled": true,
+          "baseline": 60,
+          "halfLifeHours": 6,
+          "sensitivity": 1,
+          "min": 0,
+          "max": 100
+        }
+      },
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "baseline": {
+            "default": 50,
+            "type": "number",
+            "minimum": 0
+          },
+          "halfLifeHours": {
+            "default": 6,
+            "type": "number",
+            "minimum": 0.1
+          },
+          "sensitivity": {
+            "default": 1,
+            "type": "number",
+            "minimum": 0
+          },
+          "min": {
+            "default": 0,
+            "type": "number",
+            "minimum": 0
+          },
+          "max": {
+            "default": 100,
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "enabled",
+          "baseline",
+          "halfLifeHours",
+          "sensitivity",
+          "min",
+          "max"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "channels": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "telegram",
+              "webhook"
+            ]
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "tokenEnv": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secretEnv": {
+            "type": "string"
+          },
+          "allowedChats": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxFileBytes": {
+            "default": 20971520,
+            "type": "number",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "enabled",
+          "allowedChats",
+          "maxFileBytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "agents": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "defaultTarget": {
+            "type": "object",
+            "properties": {
+              "channel": {
+                "type": "string"
+              },
+              "conversation": {
+                "type": "string"
+              },
+              "thread": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "private",
+                  "group"
+                ]
+              }
+            },
+            "required": [
+              "channel",
+              "conversation"
+            ],
+            "additionalProperties": false
+          },
+          "targets": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string"
+                },
+                "conversation": {
+                  "type": "string"
+                },
+                "thread": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private",
+                    "group"
+                  ]
+                }
+              },
+              "required": [
+                "channel",
+                "conversation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "routes": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string"
+                },
+                "conversation": {
+                  "type": "string"
+                },
+                "thread": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "private",
+                    "group"
+                  ]
+                }
+              },
+              "required": [
+                "channel",
+                "conversation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "skills": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "main": {
+            "type": "object",
+            "properties": {
+              "baseUrl": {
+                "default": "https://api.openai.com/v1",
+                "type": "string",
+                "format": "uri"
+              },
+              "apiKeyEnv": {
+                "default": "OPENAI_API_KEY",
+                "type": "string"
+              },
+              "name": {
+                "default": "gpt-4.1",
+                "type": "string"
+              },
+              "contextWindow": {
+                "default": 1047576,
+                "type": "number",
+                "minimum": 100000
+              },
+              "maxOutput": {
+                "default": 8192,
+                "type": "number",
+                "minimum": 1
+              },
+              "reasoning": {
+                "default": "off",
+                "type": "string",
+                "enum": [
+                  "off",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "compat": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": false
+          },
+          "overrides": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "defaultTarget",
+          "targets",
+          "routes",
+          "skills",
+          "overrides"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "mcp": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "env": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "headersEnv": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "enabled",
+          "args",
+          "env"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "dataDir",
+    "agentsDir",
+    "server",
+    "models",
+    "history",
+    "context",
+    "memory",
+    "state",
+    "style",
+    "runtime",
+    "delivery",
+    "scheduler",
+    "prompts",
+    "drives",
+    "channels",
+    "agents",
+    "mcp"
+  ],
+  "additionalProperties": false
+}

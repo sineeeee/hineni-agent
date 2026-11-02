@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.env
+agents
+data
+
+# Local installation and credentials; keep portable examples in version control.
+/config.yaml
+.env.*
+!.env.example
+.DS_Store
+*.sqlite*
+*.db

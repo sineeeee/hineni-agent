@@ -1,0 +1,17 @@
+[Unit]
+Description=Hineni personal agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hineni
+WorkingDirectory=/opt/hineni-agent
+ExecStart=/usr/bin/node /opt/hineni-agent/dist/src/main.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

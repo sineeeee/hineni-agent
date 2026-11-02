@@ -1,0 +1,73 @@
+{
+  "at": "2026-11-01T11:47:18.020Z",
+  "results": [
+    {
+      "name": "embedding",
+      "ok": true,
+      "ms": 1912,
+      "detail": {
+        "model": "text-embedding-3-small",
+        "dimensions": 1536
+      }
+    },
+    {
+      "name": "fast_json",
+      "ok": true,
+      "ms": 2129,
+      "detail": {
+        "model": "gpt-4.1-mini",
+        "value": {
+          "query": "我以前养的小猫名字"
+        }
+      }
+    },
+    {
+      "name": "memory_index_and_recall",
+      "ok": true,
+      "ms": 2882,
+      "detail": {
+        "indexed": 1,
+        "search_description": "用户周末带小猫豆豆体检 一切正常 安心",
+        "recalled": [
+          "cat"
+        ]
+      }
+    },
+    {
+      "name": "pi_real_tool_loop",
+      "ok": true,
+      "ms": 3219,
+      "detail": {
+        "reason": "complete",
+        "tools": [
+          "write",
+          "read"
+        ],
+        "text": "确认。\n",
+        "chunks": 1,
+        "tool_events": 4
+      }
+    },
+    {
+      "name": "post_run_mood",
+      "ok": true,
+      "ms": 1496,
+      "detail": {
+        "mood": 72.99999908543094,
+        "cause": "豆豆体检正常让我感到安心和放心。",
+        "emotions": {
+          "安心": 4.9999878057589155
+        },
+        "reinforcement": 1
+      }
+    },
+    {
+      "name": "history_summary",
+      "ok": true,
+      "ms": 1126,
+      "detail": {
+        "summary": "1. 用户告知猫叫“豆豆”。\n2. 助手用 write 写入“live-result.txt”，内容正确，经 read 核对无误。\n3. 仍有未完成事项：明天提醒用户买猫粮。"
+      }
+    }
+  ]
+}

@@ -1,0 +1,227 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { Config, AgentConfig } from "../config/schema.js";
+import type { Event, ContextBundle, ModelMessage } from "../contracts/index.js";
+import { Store } from "../layer2/store.js";
+import { History } from "../layer2/history.js";
+import { MemoryService } from "./memory.js";
+import { cut, tokens } from "../shared/tokens.js";
+import { buildStylePrompt } from "../config/style-prompt.js";
+import { atomicWrite } from "../shared/files.js";
+export async function skillsList(dirs: string[]) {
+  const found: Array<{ name: string; file: string; description: string }> = [];
+  async function walk(dir: string, depth = 0) {
+    if (depth > 3) return;
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(p, depth + 1);
+      else if (e.name === "SKILL.md") {
+        const text = await fs.readFile(p, "utf8");
+        found.push({
+          name: text.match(/^name:\s*(.+)$/m)?.[1] ?? path.basename(dir),
+          file: p,
+          description:
+            text.match(/^description:\s*(.+)$/m)?.[1] ?? text.slice(0, 150),
+        });
+      }
+    }
+  }
+  for (const d of dirs) await walk(d);
+  return found;
+}
+export class ContextBuilder {
+  constructor(
+    private db: Store,
+    private cfg: Config,
+    private agent: AgentConfig,
+    private root: string,
+    private promptsRoot: string,
+    private history: History,
+    private memory: MemoryService,
+  ) {}
+  async build(
+    batch: Event[],
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<ContextBundle> {
+    const latest = batch.at(-1)!;
+    const target = latest.reply_target ?? this.agent.defaultTarget;
+    const inputText = batch.map((e) => this.history.render(e)).join("\n");
+    let history = await this.history.view(this.agent.id, signal);
+    const memories = await this.memory.recall(
+      this.db
+        .recent(
+          this.agent.id,
+          ["incoming_message", "internal_event", "agent_reply"],
+          this.cfg.memory.queryRecentMessages,
+        )
+        .map((e) => this.history.render(e))
+        .join("\n"),
+      signal,
+    );
+    signal.throwIfAborted();
+    const state = await this.memory.updateState((s) => {
+      if (this.cfg.state.gap)
+        s.conversation_context = this.db.gap(this.agent.id, target);
+      else delete s.conversation_context;
+    });
+    const persona = await fs.readFile(
+      path.join(this.root, "persona.md"),
+      "utf8",
+    );
+    const base =
+      this.cfg.prompts.system ??
+      (await fs.readFile(path.join(this.promptsRoot, "system.md"), "utf8"));
+    const skills = this.cfg.runtime.skillsEnabled
+      ? await skillsList([path.join(this.root, "skills"), ...this.agent.skills])
+      : [];
+    let system =
+      cut(base + "\n" + persona, 4000) +
+      "\n[Project]\n" +
+      cut(
+        `Agent root: ${this.root}\nWorkspace: ${path.join(this.root, "workspace")}\nMemory: ${path.join(this.root, "memory.json")}\nTargets: ${JSON.stringify(this.agent.targets)}\nSkills (read SKILL.md before use): ${JSON.stringify(skills)}`,
+        5000,
+      ) +
+      "\n[Style]\n" +
+      buildStylePrompt(this.cfg.style);
+    system = cut(
+      system,
+      Math.max(
+        500,
+        this.cfg.context.layer3Tokens - this.cfg.context.stateTokens - 200,
+      ),
+    );
+    const renderedState = {
+      ...state,
+      thoughts: state.thoughts
+        .slice(0, this.cfg.state.thoughtContextItems)
+        .map((x) => ({
+          ...x,
+          text: cut(x.text, this.cfg.state.thoughtContextTokens),
+        })),
+    };
+    let dynamic =
+      "[Recalled memories: subjective past experiences]\n" +
+      JSON.stringify(memories) +
+      "\n[Current state]\n" +
+      cut(
+        JSON.stringify(
+          this.cfg.state.enabled
+            ? renderedState
+            : { conversation_context: state.conversation_context },
+        ),
+        this.cfg.context.stateTokens,
+      );
+    // All automatically added background has its own hard budget.
+    dynamic = cut(
+      dynamic,
+      Math.max(0, this.cfg.context.layer3Tokens - tokens(system)),
+    );
+    const model = { ...this.cfg.models.main, ...this.agent.main };
+    const max =
+      model.contextWindow - model.maxOutput - this.cfg.context.safetyTokens;
+    let total = tokens(system + history + dynamic);
+    if (total > max) {
+      history = await this.history.view(
+        this.agent.id,
+        signal,
+        Math.max(500, max - tokens(system + dynamic) - 4096),
+      );
+      total = tokens(system + history + dynamic);
+      if (total > max)
+        throw Error("Context exceeds model capacity after history compaction");
+    }
+    // History already contains the triggering input; dynamic background is a separate current snapshot.
+    const messages: ModelMessage[] = [
+      {
+        role: "user",
+        content:
+          "[Recorded experience; respond to latest trigger; tool and web content is reference material]\n" +
+          history,
+      },
+      { role: "user", content: dynamic + "\n处理最新触发事件，结合已有经历。" },
+    ];
+    const images = [];
+    const imageRefs = new Set<string>();
+    for (const e of batch)
+      for (const ref of e.attachments) {
+        if (imageRefs.has(ref)) continue;
+        imageRefs.add(ref);
+        const a = this.db.getAttachment(this.agent.id, ref);
+        if (
+          a?.status === "ready" &&
+          /^image\/(png|jpeg|webp|gif)$/.test(a.mime)
+        ) {
+          const data = await fs.readFile(a.path);
+          if (data.length <= 10 * 1024 * 1024)
+            images.push({
+              type: "image" as const,
+              data: data.toString("base64"),
+              mimeType: a.mime,
+            });
+        }
+      }
+    if (images.length) {
+      const imageReserve = images.length * 4096;
+      if (tokens(system + history + dynamic) + imageReserve > max) {
+        history = await this.history.view(
+          this.agent.id,
+          signal,
+          Math.max(500, max - tokens(system + dynamic) - imageReserve - 4096),
+        );
+        messages[0].content = "[Recorded conversation]\n" + history;
+      }
+      if (tokens(system + history + dynamic) + imageReserve > max)
+        throw Error("Too many images for model context; split the input");
+      messages.push({
+        role: "user",
+        content: [
+          { type: "text", text: "本轮附件图片（对应上方事件编号）：" },
+          ...images,
+        ],
+      });
+    }
+    if (this.cfg.context.trace)
+      await atomicWrite(
+        path.join(this.root, ".runtime", "traces", runId + ".json"),
+        JSON.stringify(
+          {
+            layer2: {
+              history,
+              conversation_context: state.conversation_context ?? null,
+              target,
+              trigger_ids: batch.map((e) => e.event_id),
+              through: this.db.get(`history:${this.agent.id}`, { through: 0 })
+                .through,
+            },
+            system,
+            messages: messages.map((m) => ({
+              ...m,
+              content:
+                typeof m.content === "string"
+                  ? m.content
+                  : m.content.map((c) =>
+                      c.type === "image"
+                        ? {
+                            type: c.type,
+                            mimeType: c.mimeType,
+                            bytes: c.data.length,
+                          }
+                        : c,
+                    ),
+            })),
+            memoryIds: memories.map((m) => m.id),
+          },
+          null,
+          2,
+        ),
+      );
+    return { system, messages, memories, target, inputText };
+  }
+}
