@@ -216,6 +216,7 @@ export async function controls(
       .reverse();
     return {
       items: rows,
+      history_revision: runtime.db.get("history-revision:" + a, 0),
       oldest: rows[0]?.seq ?? null,
       latest: rows.at(-1)?.seq ?? null,
     };

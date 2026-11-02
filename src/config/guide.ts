@@ -12,7 +12,7 @@ export const configurationGuide: Record<
     scope: "全局默认，可在 agent 的 main 或 models 覆盖；保存并重启。",
   },
   history: {
-    flow: "第二层从旧摘要检查点接上后续原文；工具结果只取尾部进入历史视图。超过阈值才调用 main 批量压缩较早部分。原始 JSONL 保留不变。",
+    flow: "第二层从旧摘要检查点接上后续原文；工具结果只取尾部进入历史视图。超过阈值才调用 main 批量压缩较早部分。压缩不改原始 JSONL；新输入取消未交接回复时会删除对应原文。",
     scope: "历史预算和 pollMs 均按当前 agent 生效。保存并重启。",
   },
   context: {

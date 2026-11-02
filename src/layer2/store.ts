@@ -19,7 +19,7 @@ export class Store {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(`
- PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
+ PRAGMA secure_delete=ON; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT NOT NULL,agent_id TEXT NOT NULL,type TEXT NOT NULL,run_id TEXT,received_at TEXT NOT NULL,payload TEXT NOT NULL,claimed INTEGER NOT NULL DEFAULT 0,UNIQUE(agent_id,event_id));
  CREATE INDEX IF NOT EXISTS events_agent ON events(agent_id,seq);
  CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,agent_id TEXT,status TEXT,started_at TEXT,ended_at TEXT,error TEXT);
@@ -29,6 +29,23 @@ export class Store {
  CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY,value TEXT);
  CREATE TABLE IF NOT EXISTS logs(seq INTEGER PRIMARY KEY AUTOINCREMENT,at TEXT,level TEXT,component TEXT,message TEXT,data TEXT);
  `);
+    if (
+      !(this.db.prepare("PRAGMA table_info(deliveries)").all() as any[]).some(
+        (c) => c.name === "handed_off",
+      )
+    ) {
+      this.db.exec(
+        "ALTER TABLE deliveries ADD COLUMN handed_off INTEGER NOT NULL DEFAULT 0",
+      );
+      this.db.exec(
+        "UPDATE deliveries SET handed_off=1 WHERE status!='queued' OR part_index>0 OR attempts>0",
+      );
+    }
+    // An interrupted physical deletion is completed before history recovery can resurrect it.
+    for (const row of this.db
+      .prepare("SELECT value FROM kv WHERE key LIKE 'prune-outbox:%'")
+      .all() as any[])
+      this.applyPrune(JSON.parse(row.value));
   }
   rebuild(agents: string[]) {
     if (this.journal)
@@ -179,6 +196,99 @@ export class Store {
     this.db
       .prepare("INSERT OR IGNORE INTO deliveries(id,payload) VALUES(?,?)")
       .run(d.id, JSON.stringify(d));
+  }
+  markHandedOff(id: string, index: number, attempts: number) {
+    this.db
+      .prepare(
+        "UPDATE deliveries SET handed_off=1,status='sending',part_index=?,attempts=? WHERE id=?",
+      )
+      .run(index, attempts, id);
+  }
+  purgeUnsent(agent: string, target: Target) {
+    const rows = (
+      this.db
+        .prepare("SELECT * FROM deliveries WHERE handed_off=0")
+        .all() as any[]
+    ).filter((row) => {
+      const d: Delivery = JSON.parse(row.payload);
+      return d.agent_id === agent && targetKey(d.target) === targetKey(target);
+    });
+    if (!rows.length) return;
+    const job = {
+      agent,
+      ids: rows.map((r) => r.id as string),
+      runs: [
+        ...new Set(rows.map((r) => (JSON.parse(r.payload) as Delivery).run_id)),
+      ],
+    };
+    // Only IDs, never discarded bodies; removed when the physical deletion completes.
+    this.set("prune-outbox:" + agent, job);
+    this.applyPrune(job);
+  }
+  retainedReplyText(agent: string, run: string) {
+    return this.runEvents(agent, run)
+      .filter((e) => e.type === "agent_reply")
+      .map((e) => e.text)
+      .join("\n");
+  }
+  pruneRunSnapshots(agent: string, run: string) {
+    this.journal?.pruneSnapshots(agent, new Set([run]));
+  }
+  private applyPrune(job: { agent: string; ids: string[]; runs: string[] }) {
+    const ids = new Set(job.ids);
+    const replacements = new Map<string, string>();
+    const deleted = job.ids.flatMap((id) => {
+      const e = this.getEvent(job.agent, id);
+      return e ? [e] : [];
+    });
+    for (const run of job.runs) {
+      const events = this.runEvents(job.agent, run);
+      const text = events
+        .filter((e) => e.type === "agent_reply" && !ids.has(e.event_id))
+        .map((e) => e.text)
+        .join("\n");
+      for (const e of events.filter((e) => e.type === "run_finished")) {
+        const result = JSON.parse(e.text);
+        replacements.set(e.event_id, JSON.stringify({ ...result, text }));
+      }
+    }
+    this.journal?.prune(job.agent, ids, replacements);
+    this.journal?.pruneSnapshots(job.agent, new Set(job.runs), ids);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const [id, text] of replacements) {
+        const e = this.getEvent(job.agent, id)!;
+        const { seq, claimed, received_at, ...payload } = e;
+        this.db
+          .prepare(
+            "UPDATE events SET payload=? WHERE agent_id=? AND event_id=?",
+          )
+          .run(JSON.stringify({ ...payload, text }), job.agent, id);
+      }
+      for (const id of ids) {
+        this.db.prepare("DELETE FROM deliveries WHERE id=?").run(id);
+        this.db
+          .prepare("DELETE FROM events WHERE agent_id=? AND event_id=?")
+          .run(job.agent, id);
+      }
+      const checkpoint = this.get("history:" + job.agent, { through: 0 });
+      if (deleted.some((e) => e.seq <= checkpoint.through))
+        this.db
+          .prepare("DELETE FROM kv WHERE key=?")
+          .run("history:" + job.agent);
+      this.set(
+        "history-revision:" + job.agent,
+        this.get("history-revision:" + job.agent, 0) + 1,
+      );
+      this.db
+        .prepare("DELETE FROM kv WHERE key=?")
+        .run("prune-outbox:" + job.agent);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
   nextDelivery(): any {
     return this.db

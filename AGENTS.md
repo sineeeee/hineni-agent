@@ -64,9 +64,9 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 
 - 根 config 保存公共设施、默认值和 agent ID 清单；个人 config 只保存明确值。缺省逐字段继承，false / 0 / [] 是明确值，数组整体替换。用 ConfigStore 读写完整配置，根文件不能独自当运行配置。
 - 每个 agent 使用自己的环境变量、人格、记忆和主经历。通过明确事件或工具获取别人的信息；私有环境显式传递，不合入 process.env。文件权限仍由运行账户决定。
-- JSONL 是原始经历，实时追加；SQLite 保存索引和运行队列。压缩保留原文，完整工具结果可追溯。
+- JSONL 是原始经历，实时追加；SQLite 保存索引和运行队列。压缩保留原文；打断时物理删除未交接的回复是明确例外。完整工具结果仍可追溯。
 - 每个 agent 同时一个执行轮次，新触发批次打断旧工作。工具记录、回复和投递确认只记录，不再次触发推理。
-- 已排队的输出继续发送；保持 run / response / chunk / part 编号和 uncertain 发送状态。
+- 新触发到达立即停止旧生成，并删除同一 agent + channel/conversation/thread 尚未交给第一层的发送任务、原始聊天正文和重复快照。handed_off 是交接边界，已交接任务继续；工具执行记录保留。保持 run / response / chunk / part 编号和 uncertain 状态。
 - 心情跟随第四层整轮结束更新；发送成功不是更新前提。
 - restart_scheduler 只重启调用者的脚本，先重读校验配置，再停旧进程。随机计时从头开始。
 - 凭据、真实 config.yaml、agents/、data/ 不进 Git；调试时不回显密钥。迁移需另外备份个人数据。

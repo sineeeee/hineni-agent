@@ -214,6 +214,7 @@ test("same poll batches input; new input cancels old run; tool events do not rec
   });
   const rt = new Runtime(f.config, f.db, async () => {}, llm, factory);
   await rt.start();
+  await rt.outbox.stop(); // Keep outputs unhanded until the interruption under test.
   f.cleanup.push(() => rt.stop());
   rt.ingress(event("a"));
   rt.ingress({ ...event("b"), text: "第二句话" });
@@ -229,8 +230,9 @@ test("same poll batches input; new input cancels old run; tool events do not rec
   assert.equal(starts, 2);
   assert.equal(
     f.db.db.prepare("SELECT COUNT(*) AS n FROM deliveries").get()!.n,
-    2,
+    1,
   );
+  assert.ok(!calls[1].includes("已看到。"));
 });
 test("outbox is serial, sent text remains after cancel and uncertain delivery requires explicit retry", async (t) => {
   const f = await fixture(t);
@@ -1485,4 +1487,303 @@ test("configuration explanations cover every field and preserve executable style
   assert.ok(!client.includes("暂存、保存、生效是三件事"));
   assert.ok(!client.includes("saveGuide()"));
   assert.ok(client.includes("class:'action-help'"));
+});
+
+test("streamed list numbering stays attached to its item", () => {
+  const emitted: string[] = [];
+  const c = new Chunker((text) => emitted.push(text));
+  c.push("步骤如下：\n");
+  for (const delta of [
+    "1.",
+    " ",
+    "第一项。",
+    "\n2.",
+    "\n",
+    "第二项。",
+    "\n3)",
+    " ",
+    "第三项。",
+  ])
+    c.push(delta);
+  c.flush();
+  assert.deepEqual(emitted, [
+    "步骤如下：",
+    "1. 第一项。",
+    "2.\n第二项。",
+    "3) 第三项。",
+  ]);
+  assert.ok(emitted.every((text) => !/^\d+[.)、]$/.test(text)));
+});
+
+test("interruption physically removes unhanded replies only in the same agent and conversation", async (t) => {
+  const f = await fixture(t);
+  const registry = new ChannelRegistry(
+    f.config.current,
+    f.db,
+    (a) => f.config.agentRoot(a),
+    () => {},
+  );
+  let entered = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sent: string[] = [];
+  registry.channels.set("local", {
+    id: "local",
+    send: async (_d, p) => {
+      entered = true;
+      await gate;
+      sent.push(p?.type === "text" ? p.text : "");
+      return { message_id: String(sent.length) };
+    },
+  });
+  const out = new Outbox(f.db, f.config.current, registry, () => {});
+  const delivery = (
+    id: string,
+    text: string,
+    extra: Partial<Delivery> = {},
+  ): Delivery => ({
+    id,
+    agent_id: "main",
+    run_id: "run-old",
+    response_id: "response-old",
+    chunk_index: 0,
+    action: "send",
+    target: event().reply_target!,
+    parts: [{ type: "text", text }],
+    ...extra,
+  });
+  out.queue(
+    delivery("started", "ALREADY_HANDED", {
+      parts: [
+        { type: "text", text: "ALREADY_HANDED" },
+        { type: "text", text: "SECOND_PART_OF_STARTED" },
+      ],
+    }),
+  );
+  out.queue(delivery("unhanded-unique-id", "SECRET_UNSENT_BODY"));
+  out.queue(
+    delivery("different-chat", "OTHER_CHAT", {
+      run_id: "run-other",
+      target: { channel: "local", conversation: "elsewhere" },
+    }),
+  );
+  out.queue(
+    delivery("different-thread", "OTHER_THREAD", {
+      run_id: "run-thread",
+      target: { channel: "local", conversation: "owner", thread: "2" },
+    }),
+  );
+  out.queue(
+    delivery("different-agent", "OTHER_AGENT", {
+      agent_id: "other",
+      run_id: "run-other-agent",
+    }),
+  );
+  f.db.append({
+    ...event("tool-remains"),
+    type: "tool_result",
+    run_id: "run-old",
+    text: "Actual tool work",
+  });
+  f.db.append({
+    ...event("old-finished"),
+    type: "run_finished",
+    run_id: "run-old",
+    text: JSON.stringify(complete("ALREADY_HANDED\nSECRET_UNSENT_BODY")),
+  });
+  const dropped = f.db.getEvent("main", "unhanded-unique-id")!;
+  f.db.set("history:main", {
+    through: dropped.seq,
+    summary: "SECRET_UNSENT_BODY",
+  });
+  const rtDir = path.join(f.root, "agents/main/.runtime");
+  await fs.mkdir(path.join(rtDir, "requests/run-old"), { recursive: true });
+  await fs.mkdir(path.join(rtDir, "requests/run-new"), { recursive: true });
+  await fs.writeFile(
+    path.join(rtDir, "requests/run-old/0.json"),
+    JSON.stringify({ text: "SECRET_UNSENT_BODY" }),
+  );
+  await fs.writeFile(
+    path.join(rtDir, "requests/run-new/0.json"),
+    JSON.stringify({ history: "event=unhanded-unique-id SECRET_UNSENT_BODY" }),
+  );
+  const sending = out.tick();
+  await wait(() => entered);
+  f.db.purgeUnsent("main", event().reply_target!);
+  assert.equal(f.db.getEvent("main", "unhanded-unique-id"), undefined);
+  assert.equal(
+    f.db.db
+      .prepare("SELECT id FROM deliveries WHERE id=?")
+      .get("unhanded-unique-id"),
+    undefined,
+  );
+  for (const id of [
+    "started",
+    "different-chat",
+    "different-thread",
+    "tool-remains",
+  ])
+    assert.ok(f.db.getEvent("main", id));
+  assert.ok(f.db.getEvent("other", "different-agent"));
+  assert.equal(f.db.get("history:main", null), null);
+  assert.equal(f.db.get("history-revision:main", 0), 1);
+  assert.ok(
+    !f.db.getEvent("main", "old-finished")!.text.includes("SECRET_UNSENT_BODY"),
+  );
+  assert.ok(
+    !JSON.stringify([
+      ...new Journal(path.join(f.root, "agents")).read("main"),
+    ]).includes("SECRET_UNSENT_BODY"),
+  );
+  await assert.rejects(fs.access(path.join(rtDir, "requests/run-old/0.json")));
+  await assert.rejects(fs.access(path.join(rtDir, "requests/run-new/0.json")));
+  release();
+  await sending;
+  assert.deepEqual(sent, ["ALREADY_HANDED", "SECOND_PART_OF_STARTED"]);
+  assert.equal(
+    (
+      f.db.db
+        .prepare("SELECT status FROM deliveries WHERE id='started'")
+        .get() as any
+    ).status,
+    "sent",
+  );
+  f.db.rebuild(["main"]);
+  out.recover();
+  assert.equal(f.db.getEvent("main", "unhanded-unique-id"), undefined);
+  assert.equal(
+    f.db.db
+      .prepare("SELECT id FROM deliveries WHERE id=?")
+      .get("unhanded-unique-id"),
+    undefined,
+  );
+});
+
+test("new ingress cancels generation immediately, removes queued text, and duplicates do not cancel newer replies", async (t) => {
+  const f = await fixture(t);
+  let starts = 0,
+    aborted = false;
+  const contexts: string[] = [];
+  const factory: ExecutorFactory = (host, _llm, record) => ({
+    run: async (req) => {
+      contexts.push(JSON.stringify(req.context.messages));
+      starts++;
+      if (starts === 1) {
+        host.send(
+          [{ type: "text", text: "SHOULD_NEVER_BE_SEEN" }],
+          req.context.target,
+          "first",
+        );
+        record({
+          event_id: "work-done",
+          type: "tool_result",
+          run_id: req.runId,
+          text: "TOOL_RESULT_KEPT",
+        });
+        await new Promise<void>((resolve) =>
+          req.signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              resolve();
+            },
+            { once: true },
+          ),
+        );
+        host.send(
+          [{ type: "text", text: "LATE_TEXT" }],
+          req.context.target,
+          "late",
+        );
+        return { ...complete("SHOULD_NEVER_BE_SEEN"), reason: "cancelled" };
+      }
+      host.send(
+        [{ type: "text", text: "NEW_REPLY" }],
+        req.context.target,
+        "new",
+      );
+      return complete("NEW_REPLY");
+    },
+  });
+  const rt = new Runtime(f.config, f.db, async () => {}, llm, factory);
+  f.cleanup.push(() => rt.stop());
+  rt.ingress(event("first-input"));
+  rt.tick();
+  await wait(() => starts === 1);
+  rt.ingress(event("interrupting-input"));
+  assert.equal(aborted, true);
+  await wait(() => {
+    rt.tick();
+    return starts === 2;
+  });
+  await wait(() => rt.status().active.length === 0);
+  assert.ok(!contexts[1].includes("SHOULD_NEVER_BE_SEEN"));
+  assert.ok(contexts[1].includes("TOOL_RESULT_KEPT"));
+  rt.ingress(event("interrupting-input"));
+  assert.ok(f.db.all("main").some((e) => e.text === "NEW_REPLY"));
+  const stored = JSON.stringify(f.db.all("main"));
+  assert.ok(!stored.includes("SHOULD_NEVER_BE_SEEN"));
+  assert.ok(!stored.includes("LATE_TEXT"));
+  const raw = JSON.stringify([
+    ...new Journal(path.join(f.root, "agents")).read("main"),
+  ]);
+  assert.ok(!raw.includes("SHOULD_NEVER_BE_SEEN"));
+});
+
+test("handoff survives failure and manual retry; unfinished deletion resumes before rebuild", async (t) => {
+  const f = await fixture(t);
+  const registry = new ChannelRegistry(
+    f.config.current,
+    f.db,
+    (a) => f.config.agentRoot(a),
+    () => {},
+  );
+  registry.channels.set("local", {
+    id: "local",
+    send: async () => {
+      throw new SendFailure("definite failure");
+    },
+  });
+  const out = new Outbox(f.db, f.config.current, registry, () => {});
+  const d: Delivery = {
+    id: "retry-me",
+    agent_id: "main",
+    run_id: "r",
+    response_id: "r:0",
+    chunk_index: 0,
+    target: event().reply_target!,
+    action: "send",
+    parts: [{ type: "text", text: "HANDED_ONCE" }],
+  };
+  out.queue(d);
+  await out.tick();
+  f.db.deliveryUpdate(d.id, "queued", 0, 0);
+  f.db.purgeUnsent("main", d.target);
+  assert.ok(f.db.getEvent("main", d.id));
+  out.queue({
+    ...d,
+    id: "remove-after-crash",
+    parts: [{ type: "text", text: "CRASH_PENDING" }],
+  });
+  f.db.set("prune-outbox:main", {
+    agent: "main",
+    ids: ["remove-after-crash"],
+    runs: ["r"],
+  });
+  const journal = new Journal(path.join(f.root, "agents"));
+  journal.prune("main", new Set(["remove-after-crash"]), new Map());
+  const recovered = new Store(
+    path.join(f.root, "data/runtime.sqlite"),
+    journal,
+  );
+  try {
+    recovered.rebuild(["main"]);
+    assert.equal(recovered.getEvent("main", "remove-after-crash"), undefined);
+    assert.equal(recovered.get("prune-outbox:main", null), null);
+    assert.ok(recovered.getEvent("main", d.id));
+  } finally {
+    recovered.close();
+  }
 });

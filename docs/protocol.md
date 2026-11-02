@@ -44,6 +44,8 @@
 | delivery_result                      | 否   | 平台已确认送达的结果               |
 | run_finished                         | 否   | 完整执行的结束原因和触发编号       |
 
+新触发去重后立即取消旧生成，并删除同 agent、同 channel/conversation/thread 尚未交接的旧发送任务；缺省目标为 agent.defaultTarget。该规则同样适用于统一入口的内部触发和附件结果。原始聊天正文同步物理删除，工具记录保留。
+
 内部附件事件继承 parent_event_id。工具结果关联 run_id / call_id。所有数据可读于 history 文件；运行库不额外伪造用户发言。
 
 ## 附件
@@ -63,6 +65,8 @@ Delivery = {
   message_id?, emoji?
 }
 ```
+
+第二层在首次调用 Channel.send 前设置持久化 handed_off 标记；从这一刻起整条 Delivery 不因新输入被取消，包括后续 parts 和重试。标记只属于队列存储，不增加协议字段。
 
 第一层实现 `Channel.send(delivery, part)`，返回可选平台 message_id。它负责平台长度限制、分句、typing、延迟、上传。每个 part 成功后才推进队列位置。
 
@@ -103,6 +107,8 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 ## 管理只读视图与配置解释
 
 新增 `GET /v1/admin/guide` 返回字段说明、分组范围和默认值；`GET /v1/telegram/chats` 返回当前运行渠道的已见聊天位置元信息。两者使用现有管理认证。
+
+`GET /v1/agents/:agent/timeline` 额外返回 history_revision；历史重写时递增，客户端应丢弃旧的累积缓存后重新读取。
 
 `GET /v1/agents/:agent/history-view?offset=&limit=` 返回累计 summary、through、remaining 分页、token 估计与运行阈值、当前 target/conversation_context，不触发压缩。`GET /v1/agents/:agent/layer2-snapshot?offset=&limit=` 返回最近保存的 layer2 交接快照；旧 trace 标 legacy，无快照返回 unavailable。分页是字符偏移，默认 200000、上限 1000000。
 

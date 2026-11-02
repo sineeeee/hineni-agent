@@ -99,7 +99,7 @@ export class Outbox {
       const parts: Array<Part | undefined> =
         d.action === "react" ? [undefined] : d.parts;
       for (; index < parts.length; index++) {
-        this.db.deliveryUpdate(d.id, "sending", index, row.attempts);
+        this.db.markHandedOff(d.id, index, row.attempts);
         const sent = await channel.send(d, parts[index]);
         this.db.deliveryUpdate(d.id, "queued", index + 1, 0);
         this.db.append({

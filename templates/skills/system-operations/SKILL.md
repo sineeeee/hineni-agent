@@ -29,7 +29,7 @@ description: 管理自己的定时与随机任务、调整触发间隔和提醒�
 
 ## 统一事件入口
 
-定时脚本向 `POST /v1/events` 提交 `internal_event`：`protocol_version: 1`、唯一 `event_id`、自己的 `agent_id`、`source: "scheduler"`、提醒 `text`，可加 `data.kind`。优先复用实际脚本的 `event()` 帮助函数。提醒进入第二层普通记录和轮询，再经过第三、第四层；可以打断当前执行，默认回复到自己的 defaultTarget。
+定时脚本向 `POST /v1/events` 提交 `internal_event`：`protocol_version: 1`、唯一 `event_id`、自己的 `agent_id`、`source: "scheduler"`、提醒 `text`，可加 `data.kind`。优先复用实际脚本的 `event()` 帮助函数。提醒进入第二层普通记录和轮询，再经过第三、第四层；可以打断当前执行，并删除该聊天位置尚未交给第一层的旧回复及原始正文。已交接消息继续、实际工具记录保留，默认回复到自己的 defaultTarget。
 
 宿主启动脚本时提供 `HINENI_ROOT`、`HINENI_AGENT_ID`、`HINENI_API` 和管理连接令牌；使用现有认证逻辑，不把凭据写进事件、日志或回复。模型 Key 在个人 `.env`，公共 Bot Token 和管理口令在根 `.env`。
 

@@ -170,6 +170,7 @@ export class PiExecutor implements Executor {
           thinkingLevel: m.reasoning,
         },
         streamFn: (model, context, options) => {
+          req.signal.throwIfAborted();
           if (cfg.context.trace) {
             const dir = path.join(h.root, ".runtime", "requests", req.runId);
             fs.mkdirSync(dir, { recursive: true });

@@ -95,7 +95,7 @@ SQLite 表：events 保存索引与 claimed，runs 保存运行状态，deliveri
 
 若该 agent 没在执行：事务标记这批已接手，建立 run，构建第三层上下文，再启动第四层。默认回复位置取这批最后一条 reply_target，没有则用 defaultTarget。多个 agent 可并行，但单个 agent 同时只有一个活动 run。
 
-若还在执行：向当前 AbortController 发取消；等它真正结束并释放 active 后，再从尚未接手事件启动新轮。它不是一到新消息就同时开第二个工具进程。进入新轮时旧工作已记录的工具和文字仍在历史里。
+新触发在 ingress 去重落盘后立即向当前 AbortController 发取消，并清理该 agent 在触发目标（无目标用 defaultTarget）尚未交接的旧回复。已知回声和重复事件不清理。若还在执行，等它真正结束并释放 active 后，再由轮询从尚未接手事件启动新轮。它不是一到新消息就同时开第二个工具进程。进入新轮时保留已交接的文字和实际工具记录；被取消的未交接文字不进入新上下文。
 
 第二层只保证记录与调度，不保证模型一定正确续接所有未完任务。被接手的事件不会因为 run 失败自动重新执行；用户或脚本可以发新事件要求继续。
 
@@ -270,7 +270,7 @@ bash 原始输出字节持续追加到相应 .stdout。官方工具本身可能�
 
 只接收 assistant text_delta，不把 thinking 或工具参数发给用户。中文句末标点/换行、英文句末后空白可结束一个文字块；代码围栏内暂存，assistant 消息结束时补交剩余文字。单个 delta 可能包含多句话，因此并非严格“一句一个包”。
 
-message_start 分配 response_id；每次 chunk 交第二层就入队，不等待整轮。模型可以先说“我看看”，调工具，再给结果。取消后新 chunk 不再提交，错误/取消的未完成缓冲丢弃；此前已入队继续发送。finish_without_reply 不撤回之前已提交的内容。
+message_start 分配 response_id；每次 chunk 交第二层就入队，不等待整轮。模型可以先说“我看看”，调工具，再给结果。取消后新 chunk 不再提交，错误/取消的未完成缓冲丢弃；新输入会删除同一聊天位置尚未交接的旧输出；已交接任务继续。列表编号如 `1.` 不单独提交，等待正文组成句块。finish_without_reply、超时和手动停止不额外清理队列。
 
 ### 工具清单与参数
 
@@ -306,8 +306,10 @@ transformContext 在每次请求前估计消息体 token；超过窗口减输出
 1. queue 接到 Delivery 后，较长附件 caption 先转为独立文字；文本按 split 再拆，所有渠道目前使用每部分最多 3800 字符的保守限制。
 2. 先把包含完整 delivery 的 agent_reply/outbound_action 追加到真实历史，再 enqueue。若其间进程退出，恢复时可以发现有记录而缺少队列状态的动作。
 3. 全局单队列每 200ms 取最早 queued/retry；一条的 parts 顺序发送。最早 retry 尚未到时间时会等待，不会跳到后面的新消息。
-4. 请求前标 sending，平台成功后推进 part_index，再写 delivery_result。发送确认含平台 message_id。全部部分完成标 sent。
+4. 调用 Channel.send 前标 sending 和 handed_off=1，这是整条发送任务的交接边界；后续 part 继续发送。平台成功后推进 part_index，再写 delivery_result。发送确认含平台 message_id。全部部分完成标 sent。
 5. 确定失败按 attempts 重试，等待至少 `1000 × 2^attempts` 毫秒或平台 retry_after；超次数标 failed。网络不确定/服务端错误标 uncertain，人工确认后才重新排队。
+
+新输入清理：Store.purgeUnsent 只处理同一 agent 与目标的 handed_off=0 任务，删除队列及事件索引，并重写对应 JSONL，清掉运行结果中的正文副本和相关请求/编排快照。已交接的失败或重试任务不删除；工具记录及其文件保留。若摘要覆盖了被删记录，则清空摘要检查点，下一轮从剩余原文重新构建。临时 prune-outbox ID 清单保证退出中断的删除可在启动时完成，完成即清除。管理时间线的 history_revision 变化会丢弃旧页面缓存，避免把删除内容重新拼回来。
 
 Telegram 开启 typing 时每 4 秒更新状态，发送完成停止；第一段在实际发送前才显示 typing，不是在模型刚开始思考时。send_attachment 复制稳定文件后再上传，原 workspace 文件之后改变不影响队列中副本。
 

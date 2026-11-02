@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { EventInput } from "../contracts/index.js";
 
-/** Append-only source of truth. A flushed line is readable immediately by agent tools. */
+/** Live source of truth. Unhanded outgoing messages may be physically removed on interruption. */
 export class Journal {
   constructor(private agentsDir: string) {}
   append(event: EventInput) {
@@ -37,6 +37,79 @@ export class Journal {
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
+    }
+  }
+  /** Rewrite only affected files; no backup copy retains the discarded text. */
+  prune(agent: string, ids: Set<string>, replacementText: Map<string, string>) {
+    const dir = path.join(this.agentsDir, agent, "history");
+    if (!fs.existsSync(dir)) return;
+    for (const name of fs
+      .readdirSync(dir)
+      .filter((x) => x.endsWith(".jsonl"))) {
+      const file = path.join(dir, name);
+      const original = fs.readFileSync(file, "utf8");
+      if (
+        ![...ids, ...replacementText.keys()].some((id) => original.includes(id))
+      )
+        continue;
+      let changed = false;
+      const lines: string[] = [];
+      for (const line of original.split("\n")) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (ids.has(event.event_id)) {
+          changed = true;
+          continue;
+        }
+        const text = replacementText.get(event.event_id);
+        if (text !== undefined && text !== event.text) {
+          event.text = text;
+          changed = true;
+          lines.push(JSON.stringify(event));
+        } else lines.push(line);
+      }
+      if (!changed) continue;
+      const temp = file + ".prune.tmp";
+      const fd = fs.openSync(temp, "w", 0o600);
+      try {
+        fs.writeFileSync(fd, lines.length ? lines.join("\n") + "\n" : "");
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(temp, file);
+    }
+  }
+  pruneSnapshots(
+    agent: string,
+    runIds: Set<string>,
+    eventIds = new Set<string>(),
+  ) {
+    const runtime = path.join(this.agentsDir, agent, ".runtime");
+    for (const run of runIds) {
+      fs.rmSync(path.join(runtime, "requests", run), {
+        recursive: true,
+        force: true,
+      });
+      fs.rmSync(path.join(runtime, "traces", run + ".json"), { force: true });
+    }
+    // Later snapshots can have copied an earlier queued reply into their history.
+    const scan = (dir: string) => {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) continue;
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) scan(file);
+        else if (
+          entry.name.endsWith(".json") &&
+          [...eventIds].some((id) => fs.readFileSync(file, "utf8").includes(id))
+        )
+          fs.rmSync(file);
+      }
+    };
+    if (eventIds.size) {
+      scan(path.join(runtime, "requests"));
+      scan(path.join(runtime, "traces"));
     }
   }
   *read(agentId: string): Generator<EventInput> {

@@ -14,7 +14,7 @@ import type {
   Part,
   Target,
 } from "../contracts/index.js";
-import { EventSchema } from "../contracts/index.js";
+import { EventSchema, triggerTypes } from "../contracts/index.js";
 import { ConfigStore } from "../config/store.js";
 import { Store } from "./store.js";
 import { History } from "./history.js";
@@ -109,7 +109,14 @@ export class Runtime {
       e.type = "delivery_result";
       e.data = { ...e.data, echo: true };
     }
-    return this.db.append(e);
+    if (this.db.getEvent(e.agent_id, e.event_id))
+      return this.db.getEvent(e.agent_id, e.event_id)!;
+    const incoming = this.db.append(e);
+    if (triggerTypes.has(e.type)) {
+      this.active.get(a.id)?.controller.abort(new Error("New event"));
+      this.db.purgeUnsent(a.id, e.reply_target ?? a.defaultTarget);
+    }
+    return incoming;
   }
   async start() {
     this.db.rebuild(this.cfg.agents.map((a) => a.id));
@@ -247,12 +254,15 @@ export class Runtime {
         memoryIds: [],
         error: "No result",
       };
+      // Do not persist a second copy of replies already removed from the outbox/history.
+      const retainedText = this.db.retainedReplyText(a.id, runId);
+      if (signalWithTimeout.aborted) this.db.pruneRunSnapshots(a.id, runId);
       this.db.finish(runId, result.reason, result.error);
       record({
         event_id: runId + ":done",
         type: "run_finished",
         run_id: runId,
-        text: JSON.stringify(result),
+        text: JSON.stringify({ ...result, text: retainedText }),
         data: {
           reason: result.reason,
           trigger_ids: batch.map((e) => e.event_id),

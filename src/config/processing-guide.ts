@@ -122,7 +122,7 @@ const stages: Record<string, ProcessingGuide> = {
     steps: [
       "Runtime 启动一轮独立工作并设置总时限，PiExecutor 新建临时 Agent，把第三层的 system/messages 作为输入。按开关注册 Pi 文件、Shell、网页、应用工具和 MCP；Skills 清单已在第三层加入。",
       "每次模型和工具请求分别使用超时限制；模型可以输出文字、调用工具、看工具结果再继续。工具调用与完整返回先记入第二层；给当前模型看的文本结果超长时保留开头和完整文件路径。",
-      "完整文字块按生成顺序交给发送队列。达到轮次/总时间上限或有新触发时结束本轮；已经入队的输出继续发送。下一轮新建 Pi Agent，从我们自己的记录重新获得经历。",
+      "完整文字块按生成顺序交给发送队列。达到轮次/总时间上限或有新触发时结束本轮。新触发会删除同一聊天位置尚未交给第一层的旧回复及原始正文；已交接的任务继续，超时/手动停止不额外清理队列。下一轮新建 Pi Agent，从我们自己的记录重新获得经历。",
     ],
     code: [
       "src/layer2/runtime.ts · run / cancel",
@@ -133,7 +133,7 @@ const stages: Record<string, ProcessingGuide> = {
   },
   delivery: {
     steps: [
-      "第四层提交文字或发送工具动作后，第二层记入发送队列。Outbox 串行取出任务，第一层根据 split 把这段内容进一步拆成发送部分。",
+      "第四层提交文字或发送工具动作后，第二层记入发送队列。Outbox 在入队时按 split 拆成 parts，串行取任务交给第一层；交接前可被同一聊天的新触发删除，交接后整条任务继续发送。",
       "Telegram 发送每个部分之前按 initialDelayMs 等待，可显示 typing/upload_photo；每部分成功后队列按 partIntervalMs 再等待。已成功部分记录状态，确定失败按 attempts 重试，不确定是否送达则等人工检查。",
       "发送结果作为 delivery_result 回到第二层保存，不触发再次推理。这里使用所属 agent 的有效 delivery 配置，个人字段优先，缺省字段继承公共默认。",
     ],

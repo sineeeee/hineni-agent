@@ -35,6 +35,8 @@ export class Chunker {
     }
     if (cut) {
       const text = this.buffer.slice(0, cut).trim();
+      // Markdown numbering/markers are prefixes, not stand-alone sentences.
+      if (/^(?:\d+[.)、]|[-*+]|#{1,6})\s*$/.test(text)) return;
       this.buffer = this.buffer.slice(cut);
       if (text) this.emit(text);
     }
