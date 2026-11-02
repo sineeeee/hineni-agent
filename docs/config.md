@@ -208,7 +208,7 @@
 
 模型包含 name、baseUrl、apiKeyEnv、contextWindow、maxOutput、reasoning、compat。query/maintenance/emotion/rerank 可部分覆盖 fast；主模型和向量分别配置。compat 透传 Pi OpenAI 适配选项。
 
-agents[]：id、name、enabled、defaultTarget、targets（发送别名）、routes（接收位置）、skills（额外技能路径）、main（主模型覆盖）、overrides。overrides 支持 models/history/context/memory/state/style/runtime/delivery/prompts/drives 的深合并；同一轮保持配置快照。
+agents[]：id、name、enabled、defaultTarget、targets（发送别名）、routes（接收位置）、skills（额外技能路径）、main（主模型覆盖）、overrides。overrides 支持 models/history/context/memory/state/style/runtime/delivery/prompts/drives/scheduler/mcp；对象逐字段合并、数组整体替换；同一轮保持配置快照。
 
 channels[]：id、type（telegram/webhook）、enabled、tokenEnv、url、secretEnv、allowedChats、maxFileBytes。Telegram 文件默认20 MiB；Webhook入站上限20 MiB。
 
@@ -216,7 +216,7 @@ mcp[]：name、enabled、command/args 或 url（二选一）、env、headersEnv�
 
 ## Prompt 覆盖
 
-prompts 可设置 system / query / searchDescription / rerank / emotion，值为完整提示词。未填时使用内置模板；system 默认读取 prompts/system.md。状态和表达参数自动渲染，主模型不需要额外调用情绪记录工具。
+prompts 可设置 system / query / searchDescription / rerank / emotion，值为完整提示词。未填时使用内置模板；system 默认读取当前 agent 的 prompts/system.md。状态和表达参数自动渲染，主模型不需要额外调用情绪记录工具。
 
 ## 路径与生效
 

@@ -1,18 +1,80 @@
-# Working on Hineni
+# Hineni：AI 开发导航
 
-Read docs/manual.md first, then docs/configuration-guide.md for configuration work or docs/internals.md for implementation flows. Read docs/protocol.md before changing boundaries. Inspect only relevant sections; docs/design-reference.md is design background, not proof of implementation. Keep these guides synchronized when behavior changes.
+这是修改本项目的入口。先按下表定位相关文档和代码，按章节读取，不必通读全部手册。运行在 Hineni 里的个人 agent 使用自己的 `SYSTEM.md` 和 Skills；本文件面向维护应用的开发者 AI。
 
-- Keep vendor Pi/model types inside layer4. Public boundaries live in src/contracts.
-- JSONL history is the append-only experience source; never delete it during compaction. SQLite is an index and operational queue.
-- One active run per agent. New trigger batches cancel old work. Tool/reply/delivery events never trigger self-inference.
-- Already queued outputs keep sending. Preserve response/chunk/part IDs and uncertain delivery outcomes.
-- State update happens after layer4 run settlement, independently of sending. Memory and state are per agent.
-- No automatic memory sharing between agents. Shared-group messages are explicit new experiences.
-- Configuration must validate; every exposed control must affect behavior or be clearly identified as a prompt preference.
-- New adapters implement Channel / Executor without changing the event protocol.
-- Keep docs short, test behavioral boundaries, run npm run check, npm test and npm run build.
-- Do not commit .env, agents/, data/ or actual user memories. Keep credentials out of logs and examples.
+## 先确认任务范围
 
-- Layout v2: root config.yaml stores shared facilities/defaults and ID registry. agents/<id>/config.yaml, .env, schedule.ts, prompts/system.md are private. Use ConfigStore to assemble/save; never parse root config as a full runtime Config. Pass scoped env explicitly; never merge agent credentials into process.env. restart_scheduler is scoped to the caller. See docs/agent-layout.md.
+- 理解整体：读 [架构](docs/architecture.md)；面向用户的说明在 [完整手册](docs/manual.md)。
+- 改文件位置、配置、密钥或定时任务：先读 [Agent 文件归属与继承](docs/agent-layout.md)。
+- 改层间对象、事件方向或外部接口：先读 [协议](docs/protocol.md) 和 [类型定义](src/contracts/index.ts)。
+- 排错：先确定 agent_id、run_id、目标渠道及实际配置，再按功能定位。实现和测试用于确认当前行为；[设计背景](docs/design-reference.md) 是历史讨论，[开始使用](开始使用.md) 是本机安装说明，不能当作所有安装的状态。
 
-- Agent configuration inherits by field. Persist only explicit overrides, including false, zero and empty arrays; resolve defaults only for execution. Scheduler restart reloads and validates disk configuration before stopping the selected process.
+## 按功能找文档和代码
+
+下表代码路径均相对项目根目录；在文件中搜索给出的类或方法即可，无需依赖容易失效的行号。
+
+| 要处理的功能 | 先读文档 | 主要代码入口 |
+| --- | --- | --- |
+| 启动、初始化、整机重启 | [运行与迁移](docs/operations.md)；[启动流程](docs/internals.md#启动配置和运行组件) | `src/main.ts` → `src/application.ts`；`src/init.ts` 生成个人文件 |
+| 配置归属、继承、保存、私有凭据 | [文件与配置](docs/agent-layout.md)；[配置指南](docs/configuration-guide.md) | `src/config/store.ts`：ConfigStore；`src/config/schema.ts`：parseConfig / agentConfig |
+| 模型选择、API Key、模型列表 | [模型配置](docs/configuration-guide.md#模型地址和密钥) | `src/shared/models.ts` 辅助请求；`src/layer4/pi.ts` 主模型；`src/admin/control.ts` 凭据与模型列表 |
+| 第一层：Telegram、Webhook、聊天绑定 | [入站协议](docs/protocol.md#入站)；[接入流程](docs/internals.md#第一层接入附件与路由) | `src/layer1/channels.ts`：ChannelRegistry；`src/admin/server.ts`：/v1/events |
+| 图片、附件、生成文件 | [附件协议](docs/protocol.md#附件) | `src/layer1/channels.ts` 下载；`src/layer4/tools.ts` 发送工具；`src/layer2/store.ts` 附件状态 |
+| 第二层：记录、轮询、批次、打断 | [记录与打断](docs/internals.md#第二层记录触发与打断) | `src/layer2/runtime.ts`：ingress / tick / execute；`store.ts` 索引；`journal.ts` JSONL |
+| 历史压缩、查原文、交流间隔 | [历史压缩](docs/internals.md#第二层历史压缩)；[交流间隔](docs/internals.md#交流间隔) | `src/layer2/history.ts`；`src/layer2/store.ts`：gap；`src/layer4/tools.ts`：history_* |
+| 第三层：上下文拼接、预算、Skills 发现 | [上下文与提示词](docs/internals.md#第三层上下文与提示词) | `src/layer3/context.ts`：ContextBuilder.build；`src/shared/tokens.ts` |
+| 记忆写入、索引、查询、召回、遗忘 | [记忆流程](docs/internals.md#第三层长期记忆与索引)；[记忆配置](docs/configuration-guide.md#记忆分别调写入索引召回和遗忘) | `src/layer3/memory.ts`：items / sync / search / recall；`templates/skills/personal-memory/SKILL.md` |
+| 心情、驱动力、短期激活、重温 | [状态更新](docs/internals.md#第三层状态与回合后更新) | `src/layer3/memory.ts`：state / afterRun；`src/layer2/runtime.ts` 的执行收尾 |
+| 回复风格、人格、基础 Prompt | [人格与篇幅](docs/configuration-guide.md#人格基础提示词和回复篇幅) | `src/config/style-prompt.ts`；`src/layer3/context.ts`；`prompts/system.md`、`templates/persona.md` 是模板 |
+| 第四层：Pi、工具循环、取消、断句 | [执行与工具](docs/internals.md#第四层执行与工具) | `src/layer4/pi.ts`：PiExecutor；`src/layer4/chunker.ts`；`src/layer4/tools.ts` |
+| MCP、网页、文件、终端工具 | [工具配置](docs/configuration-guide.md#工具skills-和-mcp)；[工具清单](docs/internals.md#工具清单与参数) | `src/layer4/mcp.ts`；`src/layer4/tools.ts`；`src/layer4/pi.ts` 注册 Pi 工具 |
+| 回复排队、重试、表情、沉默、群聊 | [反向流程](docs/internals.md#反向流程排队发送确认)；[出站协议](docs/protocol.md#出站) | `src/layer2/outbox.ts` → `src/layer1/channels.ts`；`src/layer4/tools.ts` 产生动作 |
+| 定时、随机聊天、梦境、脚本重启 | [定时文件归属](docs/agent-layout.md#main-的定时任务改哪里)；[定时流程](docs/internals.md#定时脚本内部事件与重启) | `src/scheduler.ts` 管进程；`scripts/schedule.ts` 是模板；实际运行 `agents/<id>/schedule.ts` |
+| 管理 UI、JSON 阅读、文件和 Skill 编辑 | [工作台](docs/console.md) | `src/admin/ui-client.ts` 交互；`ui.ts` 页面；`ui-style.ts` 样式；`json-viewer.ts` 折叠；`control.ts` / `files.ts` API 与文件操作 |
+| 工具日志、实际上下文、历史检查视图 | [如何查一轮](docs/manual.md#8-怎么查一轮到底发生了什么)；[检查视图](docs/internals.md#管理界面的检查视图) | `src/admin/inspect.ts`、`control.ts`；`src/layer4/pi.ts` 请求快照；`src/layer2/history.ts`：inspect |
+
+## 一条消息的路线
+
+```text
+ChannelRegistry / POST /v1/events → Runtime.ingress → Store + Journal
+Runtime.tick → History → ContextBuilder.build → PiExecutor
+工具记录 → Store；文字/附件动作 → Outbox → ChannelRegistry → 投递结果
+第四层整轮结束 → MemoryService.afterRun（不等待渠道送达）
+定时脚本只向同一个 /v1/events 提交 internal_event
+```
+
+四层是同一应用的组件。新增渠道实现 Channel；替换执行器实现 Executor，通过 Runtime 的 ExecutorFactory 注入。Pi 类型留在第四层，自有协议放 `src/contracts/`。
+
+## 改配置或文档时，哪些地方一起更新
+
+| 内容 | 维护源文件 | 对应产物/使用者 |
+| --- | --- | --- |
+| 字段、校验、默认值、合并 | `src/config/schema.ts`、`store.ts` | 运行组件、配置 API、表单 |
+| 简短字段说明、分组影响 | `src/config/help.ts`、`guide.ts` | UI 与配置参考 |
+| 人话解释、具体步骤、代码位置 | `src/config/learning.ts`、`processing-guide.ts` | UI 行内说明与逐项参考 |
+| 文件用途、何时生效 | `src/admin/file-guide.ts` | 文件编辑器与文件指南 |
+| 自动生成文档 | `scripts/generate-docs.ts`、`generate-guide.ts` | `config.example.yaml`、`docs/{config.schema.json,event.schema.json,config.md,configuration-reference.md,files-guide.md}` |
+| 手写流程与操作说明 | `docs/{agent-layout,configuration-guide,internals,protocol,console,operations}.md` | 按改动范围同步相关章节 |
+
+新增参数要贯通“schema → 实际消费代码 → UI 解释 → 文档 → 验证”；明确它改变算法、Prompt 还是仅提供模型软指导。执行 `npm run docs` 更新生成产物，直接编辑生成文件会被下次覆盖。
+
+**模板与现有个人文件分别检查。** 改 `templates/skills/`、`prompts/system.md`、`scripts/schedule.ts` 或初始化说明后，检查本次涉及的 `agents/<id>/skills/`、`prompts/`、定时脚本和 `SYSTEM.md`。初始化保留已有文件，不会替你更新它们。按差异修正相关说明、保留用户定制，并在交付中说明哪些实际文件已同步；个人文件受 Git 忽略，源码提交不包含这些改动。
+
+## 保持的行为约定
+
+- 根 config 保存公共设施、默认值和 agent ID 清单；个人 config 只保存明确值。缺省逐字段继承，false / 0 / [] 是明确值，数组整体替换。用 ConfigStore 读写完整配置，根文件不能独自当运行配置。
+- 每个 agent 使用自己的环境变量、人格、记忆和主经历。通过明确事件或工具获取别人的信息；私有环境显式传递，不合入 process.env。文件权限仍由运行账户决定。
+- JSONL 是原始经历，实时追加；SQLite 保存索引和运行队列。压缩保留原文，完整工具结果可追溯。
+- 每个 agent 同时一个执行轮次，新触发批次打断旧工作。工具记录、回复和投递确认只记录，不再次触发推理。
+- 已排队的输出继续发送；保持 run / response / chunk / part 编号和 uncertain 发送状态。
+- 心情跟随第四层整轮结束更新；发送成功不是更新前提。
+- restart_scheduler 只重启调用者的脚本，先重读校验配置，再停旧进程。随机计时从头开始。
+- 凭据、真实 config.yaml、agents/、data/ 不进 Git；调试时不回显密钥。迁移需另外备份个人数据。
+
+## 验证与交付
+
+`tests/agent-layout.test.ts` 覆盖配置继承、密钥隔离、初始化、个人脚本与重启；`tests/core.test.ts` 覆盖四层行为、工具、MCP、投递、管理页和文档字段覆盖；`tests/fixtures/mcp-server.mjs` 是本地模拟服务。
+
+代码或行为修改后执行 `npm run check`、`npm test`、`npm run build`；说明源变化运行 `npm run docs` 并检查生成差异。纯文档修改核对链接、路径和描述即可。测试用本地临时数据；真实渠道发送与付费 API 调用需按任务范围决定。验证记录写在 [validation.md](docs/validation.md)，说明实际测了什么，不把历史结果当成本次结果。
+
+交付说明改了什么、哪些个人文件已同步、何时生效和验证范围。用户只让改文档时无需重启服务；人格、基础提示词和 Skill 文件下一轮读取。

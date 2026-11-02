@@ -1,5 +1,7 @@
 # Hineni
 
+**AI 开发入口：[AGENTS.md](AGENTS.md)**：按功能查文档、代码入口与修改后同步范围，无需通读全部文档。
+
 **完整文档入口：[Hineni 完整手册](docs/manual.md)**。先读它了解整体，再按需要看 [配置指南](docs/configuration-guide.md)、[内部流程与算法](docs/internals.md)、[全部参数](docs/config.md)。
 
 当前这台机器的安装摘要见 [开始使用.md](开始使用.md)。

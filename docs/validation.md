@@ -78,3 +78,9 @@
 Git 初版仅保存源码、模板、样例、锁文件和说明；本机 config.yaml、.env、agents/、data/ 与日志排除。
 
 提交前另从 Git 暂存区导出干净源码副本，复用本机已安装依赖，执行 npm run init 与 npm run build 成功；未复制本机 config.yaml、.env、agents/ 或 data/。暂存文件已检查真实凭据及排除目录，未发现泄漏。
+
+## 2026-11-02：AI 文档导航与实际 Skill 同步
+
+AGENTS.md 按功能链接文档、代码入口、配置说明源和验证位置，补上模板与已有个人文件分别检查的规则。README 和手册指向这一入口，内部流程不再维护另一份重复代码地图。核对 96 个本地链接与章节锚点，无失效项。
+
+定时操作模板与 main 实际 system-operations Skill 已同步，main 的 SYSTEM.md 和初始化说明补上操作入口；保留现有脚本与配置。两份 Skill 通过 quick_validate.py，实际 skillsList 读取到新版描述。类型检查、35 项测试及构建通过。此轮没有触发定时招呼或重启在线服务；已有 main 的 Skill 与环境手册直接从文件读取，下一轮可用。

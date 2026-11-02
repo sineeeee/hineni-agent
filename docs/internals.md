@@ -355,24 +355,13 @@ JSONL 补索引发生在每次启动；重建的所有旧触发标已处理。�
 
 ## 代码地图与修改规则
 
-| 模块        | 代码入口                                       | 修改时需要连带检查                                       |
-| ----------- | ---------------------------------------------- | -------------------------------------------------------- |
-| 进程/初始化 | main.ts、init.ts、scheduler.ts                 | operations、默认文件和迁移                               |
-| 自有协议    | contracts/index.ts                             | protocol、event.schema、所有适配器和测试                 |
-| 配置        | config/schema.ts、help.ts、store.ts            | config.example、config.schema、参数表、UI 帮助、配置指南 |
-| 第一层      | layer1/channels.ts                             | 入站归一化、附件事件、send 结果和平台错误                |
-| 第二层      | layer2/runtime/store/journal/history/outbox.ts | 事件幂等、打断、恢复、发送序号、原始文件                 |
-| 第三层      | layer3/context/memory.ts、shared/models.ts     | Prompt 输入输出、索引签名、预算、fallback、状态公式      |
-| 第四层      | layer4/pi/tools/mcp/chunker.ts                 | 不泄漏 Pi 类型到协议、取消、完整记录、输出不重发         |
-| 管理页/API  | admin/ui.ts、server.ts                         | 文件允许列表、认证、revision、重启边界                   |
-| 默认行为    | prompts/、templates/、scripts/schedule.ts      | 现有 agent 文件不一定自动更新；需明确迁移                |
-| 验证        | tests/core.test.ts、tests/fixtures/            | 真实 SDK/本地模拟不等于真实渠道全验收                    |
+按功能查文档、实现文件、测试与联动修改范围，统一见 [AGENTS.md](../AGENTS.md)。各节上方保留本流程的局部代码入口。
 
 替换 Executor 通过 Runtime 的 ExecutorFactory 注入，实现 RunRequest/RunResult 和 record/send 回调。新增渠道实现 Channel，同时在 ChannelRegistry 加入接收与归一化；当前不是动态插件安装器，schema 中渠道类型和 backend 也需相应修改。换向量后端可保持 memory.json 与公开 memory 工具稳定，在 MemoryService 内改索引读写。
 
-新增配置必须做到 schema → 默认值/帮助 → 消费代码 → 文档 → 有意义的验证闭环；不能只添一个页面开关。运行 `npm run docs` 会生成 config.example.yaml、两份机器 schema 和 config.md，不生成本文和配置指南；修改后这几份说明也要人工同步。
+新增配置必须做到 schema → 默认值/帮助 → 消费代码 → 文档 → 有意义的验证闭环；不能只添一个页面开关。自动生成产物及其源文件见 AGENTS.md；运行 `npm run docs` 后，按改动同步本文、配置指南等手写说明。
 
-开发检查顺序：npm run check → npm test → npm run build。27 项自动测试及此前真实 API 检查范围见 validation.md；新增渠道、模型或能力要补对应验证。不要把聊天能回复当成整个系统全部验收完成。
+开发检查顺序：npm run check → npm test → npm run build。测试条目以 tests/ 为准，此前验证范围见 validation.md；新增渠道、模型或能力要补对应验证。不要把聊天能回复当成整个系统全部验收完成。
 
 ## 管理界面的检查视图
 

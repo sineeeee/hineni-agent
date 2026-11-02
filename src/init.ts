@@ -60,7 +60,7 @@ export async function initialize(root: string) {
       ["memory.json", '{"memory":[]}\n'],
       [
         "SYSTEM.md",
-        `# 自己的环境\n\nAgent: ${agent.id}\n项目：${root}\n自己的根目录：${dir}\n工作目录：${dir}/workspace\n人格：persona.md\n长期记忆：memory.json\n当前状态：state.json（系统维护当前快照）\n真实经历：history/YYYY-MM-DD.jsonl（实时追加）\n完整工具结果：history/tools/\n附件：attachments/，.json 为状态说明\n技能：skills/*/SKILL.md\n\n使用 history_search/history_read 查询自己的原始经历，使用 memory_search/memory_read 查询更多长期记忆。也可以直接读文件。系统负责每轮自动编排，不需要每次翻这些文件。\n\n记忆整理建议：每批 ${effective.memory.reviewBatchTokens} token，最多 ${effective.memory.maxReviewItems} 条；按需自行分批。\n定时脚本：${path.resolve(dir, effective.scheduler.script)}\n接口说明：${root}/docs/protocol.md\n自己的配置：${dir}/config.yaml\n自己的模型凭据：${dir}/.env\n自己的基础提示词：${dir}/prompts/system.md\n公共默认与连接配置：${root}/config.yaml\n`,
+        `# 自己的环境\n\nAgent: ${agent.id}\n项目：${root}\n自己的根目录：${dir}\n工作目录：${dir}/workspace\n人格：persona.md\n长期记忆：memory.json\n当前状态：state.json（系统维护当前快照）\n真实经历：history/YYYY-MM-DD.jsonl（实时追加）\n完整工具结果：history/tools/\n附件：attachments/，.json 为状态说明\n技能：skills/*/SKILL.md\n\n使用 history_search/history_read 查询自己的原始经历，使用 memory_search/memory_read 查询更多长期记忆。也可以直接读文件。系统负责每轮自动编排，不需要每次翻这些文件。\n\n记忆整理建议：每批 ${effective.memory.reviewBatchTokens} token，最多 ${effective.memory.maxReviewItems} 条；按需自行分批。\n定时脚本：${path.resolve(dir, effective.scheduler.script)}\n接口说明：${root}/docs/protocol.md\n自己的配置：${dir}/config.yaml\n自己的模型凭据：${dir}/.env\n自己的基础提示词：${dir}/prompts/system.md\n公共默认与连接配置：${root}/config.yaml\n\n定时与配置操作：先读 skills/system-operations/SKILL.md；文件归属与继承见项目 docs/agent-layout.md。修改自己的调度参数或脚本后调用 restart_scheduler；实际脚本路径以自己的有效 scheduler.script 为准。\n`,
       ],
     ]) {
       try {
