@@ -16,7 +16,7 @@ const $=id=>document.getElementById(id);
 const clone=x=>structuredClone(x);
 const titles={telegram:['Telegram 接入','Bot 凭据、Chat ID、接收路由与默认回复位置'],live:['工作台','聊天、附件与最近发生的事'],runs:['执行与工具','每轮推理、工具输入输出和投递结果'],context:['上下文','检查每次主模型请求前的真实文本快照'],settings:['配置','按功能调整参数，保存后重启生效'],models:['模型与密钥','获取模型列表，管理调用地址和凭据'],agents:['Agents','独立人格、记忆、工作目录与接入位置'],files:['文件与文档','直接查看和编辑真实文件'],skills:['Skills','安装、编辑和移除当前 agent 的技能'],logs:['程序日志','诊断信息；工具明细请看「执行与工具」']};
 const icons={telegram:'↗',live:'◉',runs:'☷',context:'▤',settings:'⚙',models:'◇',agents:'♙',files:'▱',skills:'⊞',logs:'≡'};
-const labels={server:'服务与端口',models:'模型',history:'历史与压缩',context:'上下文预算',memory:'记忆与召回',state:'心情与状态',style:'表达风格',runtime:'工具与执行',delivery:'发送与分句',scheduler:'主动行为与定时',prompts:'提示词覆盖',drives:'驱动力',channels:'消息渠道',agents:'Agent 设置',mcp:'MCP 服务',name:'名称',id:'编号',enabled:'启用',baseUrl:'接口地址',apiKeyEnv:'密钥变量名',contextWindow:'上下文容量',maxOutput:'输出上限',reasoning:'推理强度',compat:'兼容选项',defaultTarget:'默认回复位置',targets:'发送目标别名',routes:'额外接收位置',channel:'渠道',conversation:'聊天 ID',thread:'话题 ID',kind:'聊天类型',skills:'额外 Skill 目录',overrides:'独立配置覆盖',command:'启动命令',args:'启动参数',url:'服务地址',env:'子进程环境',headersEnv:'请求头变量名',type:'类型',tokenEnv:'凭据变量名',allowedChats:'允许的聊天 ID',maxFileBytes:'附件大小上限',secretEnv:'请求密钥变量名',baseline:'常态值',halfLifeHours:'回稳半衰期（小时）',sensitivity:'敏感度',min:'最小值',max:'最大值',main:'主模型',fast:'辅助模型',embedding:'向量模型',query:'查询模型',maintenance:'索引描述模型',emotion:'心情模型',rerank:'重排模型'};
+const labels={server:'服务与端口',models:'模型',history:'历史与压缩',context:'上下文预算',memory:'记忆与召回',state:'心情与状态',style:'表达风格',runtime:'工具与执行',delivery:'发送与分句',scheduler:'主动行为与定时',prompts:'提示词覆盖',drives:'驱动力',channels:'消息渠道',agents:'Agent 设置',mcp:'MCP 服务',name:'名称',id:'编号',enabled:'启用',protocol:'请求协议',baseUrl:'接口地址',apiKeyEnv:'密钥变量名',contextWindow:'上下文容量',maxOutput:'输出上限',reasoning:'推理强度',compat:'兼容选项',defaultTarget:'默认回复位置',targets:'发送目标别名',routes:'额外接收位置',channel:'渠道',conversation:'聊天 ID',thread:'话题 ID',kind:'聊天类型',skills:'额外 Skill 目录',overrides:'独立配置覆盖',command:'启动命令',args:'启动参数',url:'服务地址',env:'子进程环境',headersEnv:'请求头变量名',type:'类型',tokenEnv:'凭据变量名',allowedChats:'允许的聊天 ID',maxFileBytes:'附件大小上限',secretEnv:'请求密钥变量名',baseline:'常态值',halfLifeHours:'回稳半衰期（小时）',sensitivity:'敏感度',min:'最小值',max:'最大值',main:'主模型',fast:'辅助模型',embedding:'向量模型',query:'查询模型',maintenance:'索引描述模型',emotion:'心情模型',rerank:'重排模型'};
 let token=sessionStorage.getItem('hineni-token')||'',cfg,savedCfg,schema,revision,status,view='live',agentId='',epoch=0,dirty=false,selectedRun=null,currentFile=null,fileVersion=null,fileDirty=false,loadedFile='',runList=[],liveItems=[],contextRequest=null,contextFollow=true;
 const catalogs={};let helpData={sections:{},fields:{},defaults:{}},fileCatalog=[],fileCategory='agent',showAdvancedFiles=false,editorMode='read',telegramChannel='';
 function el(tag,attrs={},...children){const n=document.createElement(tag);for(const [k,v]of Object.entries(attrs)){if(k==='class')n.className=v;else if(k==='text')n.textContent=v;else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);else if(v!==undefined&&v!==null){if(k==='list')n.setAttribute(k,v);else if(k in n)n[k]=v;else n.setAttribute(k,v);}}for(const child of children.flat())if(child!==null&&child!==undefined)n.append(typeof child==='string'?document.createTextNode(child):child);return n;}
@@ -138,7 +138,7 @@ async function readContext(reset=false){
  if(!contextFollow&&contextRequest)url+='&request='+encodeURIComponent(contextRequest);
  const r=await api(url);if(!current())return;
  const select=$('requestSelect');replaceContent(select,...(r.requests.length?r.requests:[null]).map(name=>el('option',{value:name||'',text:name?'模型请求 '+(Number(name.split('.')[0])+1):'初始编排快照'})));select.value=r.request||'';
- if(r.unavailable){replaceContent(target,empty('此轮没有上下文快照','可能未开启 context.trace，或快照因打断包含未发送内容而被清理。'));return;}
+ if(r.unavailable){replaceContent(target,empty('此轮没有上下文快照','可能未开启 context.trace、已手动删除，或因打断包含未发送内容而被清理。'));return;}
  const signature=r.path+':'+r.version;
  if(signature===contextSignature&&target.dataset.complete==='true')return;
  target.dataset.complete='false';replaceContent(target,el('p',{class:'read-status',text:'正在读取完整 JSON，共 '+r.total.toLocaleString()+' 字符…'}));
@@ -153,7 +153,12 @@ async function readContext(reset=false){
  if(!current())return;
  let viewer;try{viewer=jsonViewer(JSON.parse(content),content);}catch{viewer=el('div',{},el('p',{class:'hint',text:'这份快照不是有效 JSON，已显示原文。'}),el('pre',{class:'reader',text:content}));}
  contextSignature=signature;target.dataset.complete='true';
- replaceContent(target,el('div',{class:'toolbar'},el('span',{class:'read-status',text:'完整快照 · '+r.total.toLocaleString()+' 字符'}),btn('下载完整上下文',()=>downloadFile(r.path))),viewer);
+ replaceContent(target,el('div',{class:'toolbar'},el('span',{class:'read-status',text:'完整快照 · '+r.total.toLocaleString()+' 字符'}),btn('下载完整上下文',()=>downloadFile(r.path)),btn('删除这份快照',()=>deleteContext(run,r.request??null,false)),btn('清空本轮快照',()=>deleteContext(run,null,true))),viewer);
+}
+async function deleteContext(run,request,all){
+ if(!confirm(all?'清空本轮全部上下文快照？聊天记录、压缩摘要和记忆保留。':'永久删除这份上下文快照？聊天记录、压缩摘要和记忆保留。'))return;
+ const a=agentId;const result=await api(agentPath()+'/runs/'+encodeURIComponent(run)+'/context','DELETE',all?{mode:'all'}:{mode:'selected',request});
+ if(a!==agentId)return;contextRequest=null;contextSignature='';await loadContext(true);notify('已删除 '+result.deleted_snapshots+' 份快照。');
 }
 function at(obj,parts){return parts.reduce((o,k)=>o?.[k],obj);}function setAt(obj,parts,value){let o=obj;for(const k of parts.slice(0,-1)){if(o[k]===undefined)o[k]={};o=o[k];}o[parts.at(-1)]=value;}
 function defaultValue(s){if(s?.default!==undefined)return clone(s.default);if(s?.enum)return s.enum[0];if(s?.type==='object')return Object.fromEntries(Object.entries(s.properties||{}).filter(([k,v])=>(s.required||[]).includes(k)||v.default!==undefined).map(([k,v])=>[k,defaultValue(v)]));if(s?.type==='array')return [];if(s?.type==='boolean')return true;if(s?.type==='number'||s?.type==='integer')return s.minimum||0;return '';}

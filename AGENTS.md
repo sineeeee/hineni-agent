@@ -32,7 +32,7 @@
 | 回复排队、重试、表情、沉默、群聊 | [反向流程](docs/internals.md#反向流程排队发送确认)；[出站协议](docs/protocol.md#出站) | `src/layer2/outbox.ts` → `src/layer1/channels.ts`；`src/layer4/tools.ts` 产生动作 |
 | 定时、随机聊天、梦境、脚本重启 | [定时文件归属](docs/agent-layout.md#main-的定时任务改哪里)；[定时流程](docs/internals.md#定时脚本内部事件与重启) | `src/scheduler.ts` 管进程；`scripts/schedule.ts` 是模板；实际运行 `agents/<id>/schedule.ts` |
 | 管理 UI、JSON 阅读、文件和 Skill 编辑 | [工作台](docs/console.md) | `src/admin/ui-client.ts` 交互；`ui.ts` 页面；`ui-style.ts` 样式；`json-viewer.ts` 折叠；`control.ts` / `files.ts` API 与文件操作 |
-| 工具日志、实际上下文、历史检查视图 | [如何查一轮](docs/manual.md#8-怎么查一轮到底发生了什么)；[检查视图](docs/internals.md#管理界面的检查视图) | `src/admin/inspect.ts`、`control.ts`；`src/layer4/pi.ts` 请求快照；`src/layer2/history.ts`：inspect |
+| 工具日志、实际上下文、历史检查视图 | [如何查一轮](docs/manual.md#8-怎么查一轮到底发生了什么)；[检查视图](docs/internals.md#管理界面的检查视图) | `src/admin/inspect.ts`、`control.ts`（独立 DELETE context 删除请求/初始快照）；`src/layer4/pi.ts` 请求快照；`src/layer2/history.ts`：inspect |
 
 ## 一条消息的路线
 

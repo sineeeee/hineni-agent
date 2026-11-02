@@ -256,7 +256,7 @@ context.trace=true 时写 `.runtime/traces/<run_id>.json`，包含初始 system�
 
 ### 一次执行
 
-每次 Executor.run 新建 Agent，systemPrompt 用第三层给定字符串，messages 用第三层给定历史和背景。主模型通过 Pi 的 openai-completions 适配器流式调用，工具执行设置 sequential。这个临时 Agent 在一轮内部保存工具来回，下一轮不复用；“stateless”指跨轮无 Pi 私有长期历史，不是每调一次工具都忘掉本轮。
+每次 Executor.run 新建 Agent，systemPrompt 用第三层给定字符串，messages 用第三层给定历史和背景。主模型按 protocol 通过 Pi 的 openai-responses（默认）或 openai-completions 适配器流式调用，工具执行设置 sequential。这个临时 Agent 在一轮内部保存工具来回，下一轮不复用；“stateless”指跨轮无 Pi 私有长期历史，不是每调一次工具都忘掉本轮。
 
 开始前连接已配置 MCP、汇总工具并检查重名。toolsEnabled=false 时注册表为空。每个工具都收到取消信号和超时；是否迅速停下取决于具体工具是否响应。bash 默认用 toolTimeoutMs，允许 args.timeout 秒申请更长，但不超过 shellMaxTimeoutMs。
 
@@ -380,3 +380,9 @@ Telegram 收到 message 后，在入站允许列表检查之前更新 `telegram-
 配置说明分为三份展示资料：guide.ts 保留逐项实现约束，learning.ts 用具体例子解释含义与调整结果，processing-guide.ts 解释消费函数、处理顺序、读写位置和下一轮影响。管理 API 与生成文档共用这些资料，不把它们注入 agent prompt。字段与文件的绝对路径由当前 ConfigStore 动态返回。
 
 表达风格文本移到 config/style-prompt.ts 的 buildStylePrompt，ContextBuilder 与管理页预览使用同一个函数；仅提取原逻辑，不改变生成文本或模型行为。操作说明改为默认收起的问号，不更改保存/重启语义。
+
+### 模型请求协议与快照删除
+
+模型 protocol 默认 responses。PiExecutor 选择 Pi 的 openai-responses 或 openai-completions 适配器，继续使用相同的工具回调、断句和取消信号；请求快照记录 protocol。OpenAIModels 的辅助 JSON 和摘要也按槽位选择接口，向量保持 embeddings。Responses 显式 store:false，由本地传入完整上下文，跨轮仍是全新执行。协议错误不会自动降级或重试为另一种协议，避免静默改变推理能力。
+
+上下文删除走独立管理接口，仅 unlink 指定请求文件或本轮快照，检查 agent/run 归属、文件名、符号链接及运行状态。它不调用 eraseHistory 或 clearHistorySummary；历史删除也不调用此接口。

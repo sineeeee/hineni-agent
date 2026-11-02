@@ -99,7 +99,8 @@ tokenEnv|管理口令的环境变量名；实际值在 .env，至少 24 字符�
 );
 rows(
   "model",
-  `baseUrl|兼容接口根地址，通常到 /v1。模型列表和本槽位的请求使用此地址。
+  `protocol|responses（默认）或 chat-completions。主调用和辅助调用各自使用槽位协议；压缩沿用主模型。Responses 使用 store:false，不使用远端会话 ID。向量忽略此项。保存并重启生效。
+baseUrl|兼容接口根地址，通常到 /v1。模型列表和本槽位的请求使用此地址。
 apiKeyEnv|当前 agent 的 .env 内的变量名，如 OPENAI_API_KEY；实际 key 在凭据区填写。不能把 key 本身填这里。
 name|请求发给服务商的精确模型 ID。可从模型列表选择；列表不会检查工具、视觉或 JSON 支持。
 contextWindow|主模型预算计算使用的窗口大小。填大不会扩展服务商限制；辅助/embedding 槽位的此项目前不限制请求。

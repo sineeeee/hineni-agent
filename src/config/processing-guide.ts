@@ -27,7 +27,7 @@ const stages: Record<string, ProcessingGuide> = {
   model: {
     steps: [
       "先由 agentConfig 合并该 agent 的有效模型配置。主模型交给 PiExecutor；query、maintenance、emotion、rerank 分别把自己的字段覆盖在 fast 上；embedding 单独使用向量模型。",
-      "主模型发出聊天与工具请求。辅助模型以 system=该用途的指令、user=本次材料的 JSON 发 Chat Completions，并要求返回 JSON；向量模型走 embeddings。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。",
+      "每个模型槽位通过 protocol 选择 Responses 或 Chat Completions。主模型由 Pi 转换工具和消息；辅助模型发送用途指令与本次材料，要求 JSON；摘要沿用主模型协议，向量模型始终走 embeddings。Responses 设置 store:false，每次完整传入编排材料，不接远端会话。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。",
       "模型设置不由运行结果回写。辅助结果由记忆或心情模块接收，影响本轮回忆或下一轮状态。",
     ],
     code: [

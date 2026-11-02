@@ -4,6 +4,7 @@ const flag = (d = true) => z.boolean().default(d);
 const n = (d: number, min = 0) => z.number().min(min).default(d);
 const model = z
   .object({
+    protocol: z.enum(["responses", "chat-completions"]).default("responses"),
     baseUrl: z.string().url().default("https://api.openai.com/v1"),
     apiKeyEnv: z.string().default("OPENAI_API_KEY"),
     name: z.string().default("gpt-4.1"),

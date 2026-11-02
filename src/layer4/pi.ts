@@ -5,7 +5,8 @@ import {
   type AgentTool,
   type AgentMessage,
 } from "@earendil-works/pi-agent-core";
-import { streamSimple } from "@earendil-works/pi-ai/api/openai-completions";
+import { streamSimple as streamChat } from "@earendil-works/pi-ai/api/openai-completions";
+import { streamSimple as streamResponses } from "@earendil-works/pi-ai/api/openai-responses";
 import {
   createCodingTools,
   createGrepTool,
@@ -157,7 +158,10 @@ export class PiExecutor implements Executor {
           model: {
             id: m.name,
             name: m.name,
-            api: "openai-completions",
+            api:
+              m.protocol === "responses"
+                ? "openai-responses"
+                : "openai-completions",
             provider: "openai",
             baseUrl: m.baseUrl,
             reasoning: m.reasoning !== "off",
@@ -180,6 +184,7 @@ export class PiExecutor implements Executor {
                 request_index: requestIndex,
                 captured_at: new Date().toISOString(),
                 model: m.name,
+                protocol: m.protocol,
                 context,
               },
               (_key, value) => {
@@ -203,17 +208,21 @@ export class PiExecutor implements Executor {
             fs.writeFileSync(file + ".tmp", snapshot, { mode: 0o600 });
             fs.renameSync(file + ".tmp", file);
           }
-          return streamSimple(model as any, context, {
-            ...options,
-            apiKey: key,
-            maxTokens: m.maxOutput,
-            signal: options?.signal
-              ? AbortSignal.any([
-                  options.signal,
-                  AbortSignal.timeout(cfg.runtime.timeoutMs),
-                ])
-              : AbortSignal.timeout(cfg.runtime.timeoutMs),
-          });
+          return (m.protocol === "responses" ? streamResponses : streamChat)(
+            model as any,
+            context,
+            {
+              ...options,
+              apiKey: key,
+              maxTokens: m.maxOutput,
+              signal: options?.signal
+                ? AbortSignal.any([
+                    options.signal,
+                    AbortSignal.timeout(cfg.runtime.timeoutMs),
+                  ])
+                : AbortSignal.timeout(cfg.runtime.timeoutMs),
+            },
+          );
         },
         getApiKey: () => key,
         toolExecution: "sequential",

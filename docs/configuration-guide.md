@@ -96,6 +96,7 @@ query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆
 
 | 模型字段      | 类型/默认规则               | 实际作用                                                   |
 | ------------- | --------------------------- | ---------------------------------------------------------- |
+| protocol | responses（默认）/ chat-completions | 本槽位的请求协议，保存并重启生效；向量调用忽略 |
 | baseUrl       | URL；默认 OpenAI `/v1`      | 请求端点                                                   |
 | apiKeyEnv     | 字符串；默认 OPENAI_API_KEY | 读取凭据的变量名                                           |
 | name          | 字符串                      | 服务商的精确模型 ID                                        |
@@ -104,7 +105,7 @@ query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆
 | reasoning     | off/minimal/low/medium/high | 当前只透传到第四层 Pi 主调用                               |
 | compat        | 对象                        | 当前只透传到 Pi 的 OpenAI 适配器；键由所装 Pi 版本定义     |
 
-辅助调用采用 OpenAI Chat Completions，要求支持 JSON object 输出；向量调用只消费 embedding 的地址、key 和模型名，embedding.maxOutput/contextWindow/reasoning 不控制向量请求。主调用的 reasoning/compat 不会自动套用到摘要、快模型或网页搜索。
+主模型、辅助模型和历史压缩均支持 Responses / Chat Completions，默认 Responses。旧配置未写 protocol 时也使用 Responses；只支持旧接口的供应商请明确选择 chat-completions。Responses 每次完整传入上下文，store:false，不使用 previous_response_id 或远端会话。辅助调用要求支持 JSON object 输出；向量调用只消费 embedding 的地址、key 和模型名，embedding.maxOutput/contextWindow/reasoning 不控制向量请求。主调用的 reasoning/compat 不会自动套用到摘要、快模型或网页搜索。
 
 网页搜索另外调用主端点的 Responses web_search。服务商只支持 Chat Completions 时，聊天可用而 web_search 仍可能失败。
 
@@ -478,3 +479,5 @@ node --input-type=module -e 'import fs from "node:fs"; import YAML from "yaml"; 
 它不联网、不验证账号可用性。运行代码改动后执行 npm run check、npm test、npm run build；涉及真实渠道或模型再做相应实测。备份与 VPS 启动见[运行与迁移](operations.md)。
 
 Telegram 启动连接最多等待约 30 秒；无法连接时渠道标记 failed，工作台和调度仍可启动。此时主动事件仍会被处理，但发往 Telegram 的消息可能无法送达；网络恢复后重启服务重新连接。
+
+接口格式参考 [OpenAI Responses 迁移说明](https://developers.openai.com/api/docs/guides/migrate-to-responses)。协议只决定请求表达，不改变 Hineni 的四层分工。

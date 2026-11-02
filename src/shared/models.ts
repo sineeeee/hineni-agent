@@ -49,6 +49,24 @@ export class OpenAIModels implements Intelligence {
     purpose: "query" | "maintenance" | "emotion" | "rerank" = "query",
   ) {
     const model = this.model(purpose);
+    if (model.protocol === "responses") {
+      const r = await this.client(purpose).responses.create(
+        {
+          model: model.name,
+          store: false,
+          input: [
+            { role: "system", content: system + " Return one JSON object." },
+            { role: "user", content: JSON.stringify(input) },
+          ],
+          text: { format: { type: "json_object" } },
+          max_output_tokens: model.maxOutput,
+        },
+        { signal },
+      );
+      if (r.status !== "completed" || !r.output_text)
+        throw Error("Incomplete fast-model response");
+      return JSON.parse(r.output_text);
+    }
     const r = await this.client(purpose).chat.completions.create(
       {
         model: model.name,
@@ -77,6 +95,22 @@ export class OpenAIModels implements Intelligence {
     return r.data.sort((a, b) => a.index - b.index).map((x) => x.embedding);
   }
   async summarize(text: string, budget: number, signal?: AbortSignal) {
+    if (this.cfg.models.main.protocol === "responses") {
+      const r = await this.client("main").responses.create(
+        {
+          model: this.cfg.models.main.name,
+          store: false,
+          instructions:
+            "压缩较早聊天经历以便继续交流。保留重要事件、用户修正、未完成事项、工具已取得结果及不确定性。合并旧摘要，不虚构完成情况。只输出摘要。",
+          input: text,
+          max_output_tokens: budget,
+        },
+        { signal, timeout: 300000 },
+      );
+      if (r.status !== "completed" || !r.output_text)
+        throw Error("Compaction incomplete");
+      return r.output_text;
+    }
     const r = await this.client("main").chat.completions.create(
       {
         model: this.cfg.models.main.name,

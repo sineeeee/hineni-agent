@@ -17,9 +17,9 @@
 
 | 字段 | 默认 | 作用 |
 |---|---|---|
-| `main` | `{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","name":"gpt-4.1","contextWindow":1047576,"maxOutput":8192,"reasoning":"off","compat":{}}` | 主对话和执行模型 |
-| `fast` | `{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","name":"gpt-4.1-mini","contextWindow":1047576,"maxOutput":2000,"reasoning":"off","compat":{}}` | 快速模型默认值 |
-| `embedding` | `{"baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","name":"text-embedding-3-small","contextWindow":1047576,"maxOutput":1,"reasoning":"off","compat":{}}` | 记忆向量模型 |
+| `main` | `{"protocol":"responses","baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","name":"gpt-4.1","contextWindow":1047576,"maxOutput":8192,"reasoning":"off","compat":{}}` | 主对话和执行模型 |
+| `fast` | `{"protocol":"responses","baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","name":"gpt-4.1-mini","contextWindow":1047576,"maxOutput":2000,"reasoning":"off","compat":{}}` | 快速模型默认值 |
+| `embedding` | `{"protocol":"responses","baseUrl":"https://api.openai.com/v1","apiKeyEnv":"OPENAI_API_KEY","name":"text-embedding-3-small","contextWindow":1047576,"maxOutput":1,"reasoning":"off","compat":{}}` | 记忆向量模型 |
 
 ## history
 

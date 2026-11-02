@@ -267,6 +267,62 @@ export async function controls(
       };
     },
   );
+  app.delete<{ Params: { agent: string; run: string } }>(
+    "/v1/agents/:agent/runs/:run/context",
+    async (req) => {
+      const a = agent(req.params.agent),
+        r = req.params.run;
+      runFor(runtime, a, r);
+      if (runtime.status().active.some((x) => x.run_id === r))
+        throw Object.assign(Error("这轮仍在运行，请结束后删除上下文快照。"), {
+          statusCode: 409,
+        });
+      const body = z
+        .discriminatedUnion("mode", [
+          z.object({ mode: z.literal("all") }).strict(),
+          z
+            .object({
+              mode: z.literal("selected"),
+              request: z
+                .string()
+                .regex(/^\d+\.json$/)
+                .nullable(),
+            })
+            .strict(),
+        ])
+        .parse(req.body);
+      const names = await requests(runtime, a, r);
+      if (
+        body.mode === "selected" &&
+        body.request !== null &&
+        !names.includes(body.request)
+      )
+        throw Object.assign(Error("Unknown request"), { statusCode: 404 });
+      const base = path.join(runtime.agentRoot(a), ".runtime");
+      const paths =
+        body.mode === "all"
+          ? [
+              ...names.map((n) => path.join(base, "requests", r, n)),
+              path.join(base, "traces", r + ".json"),
+            ]
+          : [
+              body.request === null
+                ? path.join(base, "traces", r + ".json")
+                : path.join(base, "requests", r, body.request),
+            ];
+      let deleted = 0;
+      for (const p of paths) {
+        await files.resolve(path.relative(config.root(), p));
+        try {
+          await fs.unlink(p);
+          deleted++;
+        } catch (e: any) {
+          if (e.code !== "ENOENT") throw e;
+        }
+      }
+      return { deleted_snapshots: deleted };
+    },
+  );
   app.get<{
     Params: { agent: string; run: string };
     Querystring: { request?: string; offset?: string; limit?: string };

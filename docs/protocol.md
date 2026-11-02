@@ -121,3 +121,7 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 配置 API 继续返回合并视图；磁盘布局见 [Agent 独立配置](agent-layout.md)。GET /v1/credentials?agent=<id> 与 PUT 的 agent_id 指向个人凭据；未指定使用公共连接凭据。POST /v1/models/discover 可传 agent_id 选择其 Key，同名变量不会混用。
 
 配置接口的 `revision` 是不透明字符串：客户端读取后原样交回，不能递增或自行生成。它由根配置和全部个人配置的文件内容计算，进程重启不会重置；旧页面提交不同版本会被拒绝。保存前还检查外部文件修改，普通写入失败回滚；跨多个文件的突然断电不保证事务原子性。配置草稿与运行中的配置分别展示，保存不等于运行组件已重建。
+
+### 删除上下文快照
+
+`DELETE /v1/agents/:agent/runs/:run/context`，使用管理认证。请求 `{ "mode": "selected", "request": "0.json" }` 删除一份请求；request 为 null 删除初始编排快照；`{ "mode": "all" }` 删除本轮全部快照。返回 deleted_snapshots。运行中返回 409；不存在的请求返回 404。只删除 .runtime 内指定快照文件，保留数据库轮次、聊天记录和摘要。

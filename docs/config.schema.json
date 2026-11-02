@@ -54,6 +54,7 @@
     "models": {
       "default": {
         "main": {
+          "protocol": "responses",
           "baseUrl": "https://api.openai.com/v1",
           "apiKeyEnv": "OPENAI_API_KEY",
           "name": "gpt-4.1",
@@ -63,6 +64,7 @@
           "compat": {}
         },
         "fast": {
+          "protocol": "responses",
           "baseUrl": "https://api.openai.com/v1",
           "apiKeyEnv": "OPENAI_API_KEY",
           "name": "gpt-4.1-mini",
@@ -72,6 +74,7 @@
           "compat": {}
         },
         "embedding": {
+          "protocol": "responses",
           "baseUrl": "https://api.openai.com/v1",
           "apiKeyEnv": "OPENAI_API_KEY",
           "name": "text-embedding-3-small",
@@ -85,6 +88,7 @@
       "properties": {
         "main": {
           "default": {
+            "protocol": "responses",
             "baseUrl": "https://api.openai.com/v1",
             "apiKeyEnv": "OPENAI_API_KEY",
             "name": "gpt-4.1",
@@ -95,6 +99,14 @@
           },
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -139,6 +151,7 @@
             }
           },
           "required": [
+            "protocol",
             "baseUrl",
             "apiKeyEnv",
             "name",
@@ -151,6 +164,7 @@
         },
         "fast": {
           "default": {
+            "protocol": "responses",
             "baseUrl": "https://api.openai.com/v1",
             "apiKeyEnv": "OPENAI_API_KEY",
             "name": "gpt-4.1-mini",
@@ -161,6 +175,14 @@
           },
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -205,6 +227,7 @@
             }
           },
           "required": [
+            "protocol",
             "baseUrl",
             "apiKeyEnv",
             "name",
@@ -217,6 +240,7 @@
         },
         "embedding": {
           "default": {
+            "protocol": "responses",
             "baseUrl": "https://api.openai.com/v1",
             "apiKeyEnv": "OPENAI_API_KEY",
             "name": "text-embedding-3-small",
@@ -227,6 +251,14 @@
           },
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -271,6 +303,7 @@
             }
           },
           "required": [
+            "protocol",
             "baseUrl",
             "apiKeyEnv",
             "name",
@@ -284,6 +317,14 @@
         "query": {
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -332,6 +373,14 @@
         "maintenance": {
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -380,6 +429,14 @@
         "emotion": {
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -428,6 +485,14 @@
         "rerank": {
           "type": "object",
           "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
             "baseUrl": {
               "default": "https://api.openai.com/v1",
               "type": "string",
@@ -1651,6 +1716,14 @@
           "main": {
             "type": "object",
             "properties": {
+              "protocol": {
+                "default": "responses",
+                "type": "string",
+                "enum": [
+                  "responses",
+                  "chat-completions"
+                ]
+              },
               "baseUrl": {
                 "default": "https://api.openai.com/v1",
                 "type": "string",

@@ -66,6 +66,11 @@ async function fixture(t: any) {
   await config.load();
   await config.save({
     ...config.current,
+    models: {
+      ...config.current.models,
+      main: { ...config.current.models.main, protocol: "chat-completions" },
+      fast: { ...config.current.models.fast, protocol: "chat-completions" },
+    },
     channels: [{ id: "local", type: "webhook" }],
     memory: {
       ...config.current.memory,
@@ -1909,23 +1914,51 @@ test("selected deletion removes only chosen second-layer records and preserves c
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, "private attachment");
   await fs.writeFile(file + ".json", "{}");
-  f.db.attachment({ id: "first", agent_id: "main", path: file, name: "first", mime: "text/plain", status: "ready" });
-  f.db.append({ ...event("remove-me"), text: "unique deleted history text 123", attachments: ["first"] });
+  f.db.attachment({
+    id: "first",
+    agent_id: "main",
+    path: file,
+    name: "first",
+    mime: "text/plain",
+    status: "ready",
+  });
+  f.db.append({
+    ...event("remove-me"),
+    text: "unique deleted history text 123",
+    attachments: ["first"],
+  });
   f.db.append({ ...event("keep-me"), text: "unrelated retained message" });
   f.db.set("history:main", { through: 1, summary: "independent summary" });
   const related = path.join(root, ".runtime", "traces", "related.json");
   const unrelated = path.join(root, ".runtime", "traces", "unrelated.json");
   await fs.mkdir(path.dirname(related), { recursive: true });
-  await fs.writeFile(related, JSON.stringify({ history: "remove-me unique deleted history text 123" }));
-  await fs.writeFile(unrelated, JSON.stringify({ history: "keep-me unrelated retained message" }));
+  await fs.writeFile(
+    related,
+    JSON.stringify({ history: "remove-me unique deleted history text 123" }),
+  );
+  await fs.writeFile(
+    unrelated,
+    JSON.stringify({ history: "keep-me unrelated retained message" }),
+  );
   const request = path.join(root, ".runtime", "requests", "test-run", "0.json");
   await fs.mkdir(path.dirname(request), { recursive: true });
   await fs.writeFile(request, JSON.stringify({ history: "remove-me" }));
   const result = f.db.eraseEvents("main", ["remove-me"]);
   assert.equal(result.deleted_events, 1);
-  assert.deepEqual(f.db.all("main").map((e) => e.event_id), ["keep-me"]);
-  assert.deepEqual([...new Journal(path.join(f.root, "agents")).read("main")].map((e) => e.event_id), ["keep-me"]);
-  assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "independent summary");
+  assert.deepEqual(
+    f.db.all("main").map((e) => e.event_id),
+    ["keep-me"],
+  );
+  assert.deepEqual(
+    [...new Journal(path.join(f.root, "agents")).read("main")].map(
+      (e) => e.event_id,
+    ),
+    ["keep-me"],
+  );
+  assert.equal(
+    f.db.get("history:main", { through: 0, summary: "" }).summary,
+    "independent summary",
+  );
   assert.equal(f.db.getAttachment("main", "first"), undefined);
   await assert.rejects(fs.stat(file));
   assert.ok((await fs.stat(related)).isFile());
@@ -1942,21 +1975,61 @@ test("deleting a reply removes its queued send and rewrites the retained run res
   const trigger = f.db.append(event("trigger"));
   f.db.claim("main", [trigger], "run-one");
   const delivery = (id: string): Delivery => ({
-    id, agent_id: "main", run_id: "run-one", response_id: "response", chunk_index: 0,
-    target: event().reply_target!, action: "send", parts: [{ type: "text", text: id }],
+    id,
+    agent_id: "main",
+    run_id: "run-one",
+    response_id: "response",
+    chunk_index: 0,
+    target: event().reply_target!,
+    action: "send",
+    parts: [{ type: "text", text: id }],
   });
-  const first = delivery("first-reply"), second = delivery("second-reply");
-  f.db.append({ ...event(first.id), type: "agent_reply", run_id: "run-one", text: "delete this reply", data: { delivery: first } });
-  f.db.append({ ...event(second.id), type: "agent_reply", run_id: "run-one", text: "keep this reply", data: { delivery: second } });
-  f.db.enqueue(first); f.db.enqueue(second);
-  f.db.append({ ...event("done"), type: "run_finished", run_id: "run-one", text: JSON.stringify({ reason: "complete", text: "delete this reply\nkeep this reply" }) });
+  const first = delivery("first-reply"),
+    second = delivery("second-reply");
+  f.db.append({
+    ...event(first.id),
+    type: "agent_reply",
+    run_id: "run-one",
+    text: "delete this reply",
+    data: { delivery: first },
+  });
+  f.db.append({
+    ...event(second.id),
+    type: "agent_reply",
+    run_id: "run-one",
+    text: "keep this reply",
+    data: { delivery: second },
+  });
+  f.db.enqueue(first);
+  f.db.enqueue(second);
+  f.db.append({
+    ...event("done"),
+    type: "run_finished",
+    run_id: "run-one",
+    text: JSON.stringify({
+      reason: "complete",
+      text: "delete this reply\nkeep this reply",
+    }),
+  });
   f.db.eraseEvents("main", [first.id]);
-  assert.equal(f.db.db.prepare("SELECT id FROM deliveries WHERE id=?").get(first.id), undefined);
-  assert.ok(f.db.db.prepare("SELECT id FROM deliveries WHERE id=?").get(second.id));
-  assert.equal(JSON.parse(f.db.getEvent("main", "done")!.text).text, "keep this reply");
+  assert.equal(
+    f.db.db.prepare("SELECT id FROM deliveries WHERE id=?").get(first.id),
+    undefined,
+  );
+  assert.ok(
+    f.db.db.prepare("SELECT id FROM deliveries WHERE id=?").get(second.id),
+  );
+  assert.equal(
+    JSON.parse(f.db.getEvent("main", "done")!.text).text,
+    "keep this reply",
+  );
   assert.equal(f.db.getEvent("main", "trigger")?.event_id, "trigger");
-  assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].find((e) => e.event_id === "done")?.text,
-    JSON.stringify({ reason: "complete", text: "keep this reply" }));
+  assert.equal(
+    [...new Journal(path.join(f.root, "agents")).read("main")].find(
+      (e) => e.event_id === "done",
+    )?.text,
+    JSON.stringify({ reason: "complete", text: "keep this reply" }),
+  );
 });
 
 test("all-history deletion is scoped to one agent and recovery cannot restore it", async (t) => {
@@ -1968,20 +2041,35 @@ test("all-history deletion is scoped to one agent and recovery cannot restore it
   f.db.set("history:main", { through: 1, summary: "separate summary" });
   const persona = path.join(f.config.agentRoot("main"), "persona.md");
   const before = await fs.readFile(persona, "utf8");
-  const trace = path.join(f.config.agentRoot("main"), ".runtime/traces/all-run.json");
+  const trace = path.join(
+    f.config.agentRoot("main"),
+    ".runtime/traces/all-run.json",
+  );
   await fs.mkdir(path.dirname(trace), { recursive: true });
   await fs.writeFile(trace, JSON.stringify({ history: "main-event" }));
-  const request = path.join(f.config.agentRoot("main"), ".runtime/requests/all-run/0.json");
+  const request = path.join(
+    f.config.agentRoot("main"),
+    ".runtime/requests/all-run/0.json",
+  );
   await fs.mkdir(path.dirname(request), { recursive: true });
   await fs.writeFile(request, JSON.stringify({ history: "main-event" }));
   f.db.eraseEvents("main", "all");
   assert.equal(f.db.all("main").length, 0);
-  assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].length, 0);
+  assert.equal(
+    [...new Journal(path.join(f.root, "agents")).read("main")].length,
+    0,
+  );
   assert.equal(f.db.all("other").length, 1);
-  assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "separate summary");
+  assert.equal(
+    f.db.get("history:main", { through: 0, summary: "" }).summary,
+    "separate summary",
+  );
   assert.ok((await fs.stat(trace)).isFile());
   assert.ok((await fs.stat(request)).isFile());
-  assert.equal(f.db.db.prepare("SELECT id FROM runs WHERE agent_id=?").get("main"), undefined);
+  assert.equal(
+    f.db.db.prepare("SELECT id FROM runs WHERE agent_id=?").get("main"),
+    undefined,
+  );
   assert.equal(await fs.readFile(persona, "utf8"), before);
   f.db.rebuild(["main", "other"]);
   assert.equal(f.db.all("main").length, 0);
@@ -1998,20 +2086,86 @@ test("history deletion API rejects invalid scopes and keeps summary separate", a
   f.db.append(event("api-delete"));
   f.db.set("history:main", { through: 1, summary: "keep summary" });
   const url = "/v1/agents/main/history";
-  (runtime as any).active.set("main", { controller: new AbortController(), promise: Promise.resolve(), runId: "busy" });
-  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "all" } })).statusCode, 409);
+  (runtime as any).active.set("main", {
+    controller: new AbortController(),
+    promise: Promise.resolve(),
+    runId: "busy",
+  });
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url,
+        headers,
+        payload: { mode: "all" },
+      })
+    ).statusCode,
+    409,
+  );
   (runtime as any).active.delete("main");
   (runtime.outbox as any).sendingAgent = "main";
-  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "all" } })).statusCode, 409);
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url,
+        headers,
+        payload: { mode: "all" },
+      })
+    ).statusCode,
+    409,
+  );
   (runtime.outbox as any).sendingAgent = null;
-  assert.equal((await server.api.inject({ method: "DELETE", url, payload: { mode: "all" } })).statusCode, 401);
-  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "selected", event_ids: ["missing"] } })).statusCode, 400);
-  assert.equal((await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "all", event_ids: ["api-delete"] } })).statusCode, 400);
-  const result = await server.api.inject({ method: "DELETE", url, headers, payload: { mode: "selected", event_ids: ["api-delete"] } });
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url,
+        payload: { mode: "all" },
+      })
+    ).statusCode,
+    401,
+  );
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url,
+        headers,
+        payload: { mode: "selected", event_ids: ["missing"] },
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url,
+        headers,
+        payload: { mode: "all", event_ids: ["api-delete"] },
+      })
+    ).statusCode,
+    400,
+  );
+  const result = await server.api.inject({
+    method: "DELETE",
+    url,
+    headers,
+    payload: { mode: "selected", event_ids: ["api-delete"] },
+  });
   assert.equal(result.statusCode, 200);
   assert.equal(result.json().deleted_events, 1);
-  assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "keep summary");
-  const summary = await server.api.inject({ method: "DELETE", url: "/v1/agents/main/history-summary", headers, payload: {} });
+  assert.equal(
+    f.db.get("history:main", { through: 0, summary: "" }).summary,
+    "keep summary",
+  );
+  const summary = await server.api.inject({
+    method: "DELETE",
+    url: "/v1/agents/main/history-summary",
+    headers,
+    payload: {},
+  });
   assert.equal(summary.statusCode, 200);
   assert.deepEqual(f.db.get("history:main", {}), {});
 });
@@ -2020,19 +2174,370 @@ test("an interrupted deletion resumes before journal recovery", async (t) => {
   const f = await fixture(t);
   f.db.append(event("crash-delete"));
   const original = (f.db as any).journal.prune;
-  (f.db as any).journal.prune = () => { throw Error("simulated interruption"); };
-  assert.throws(() => f.db.eraseEvents("main", ["crash-delete"]), /simulated interruption/);
+  (f.db as any).journal.prune = () => {
+    throw Error("simulated interruption");
+  };
+  assert.throws(
+    () => f.db.eraseEvents("main", ["crash-delete"]),
+    /simulated interruption/,
+  );
   (f.db as any).journal.prune = original;
-  const oldTrace = path.join(f.config.agentRoot("main"), ".runtime/traces/old-intent.json");
+  const oldTrace = path.join(
+    f.config.agentRoot("main"),
+    ".runtime/traces/old-intent.json",
+  );
   await fs.mkdir(path.dirname(oldTrace), { recursive: true });
   await fs.writeFile(oldTrace, JSON.stringify({ history: "crash-delete" }));
   const pending = f.db.get("erase-events:main", { files: [] as string[] });
   f.db.set("erase-events:main", { ...pending, files: [oldTrace] });
-  const reopened = new Store(path.join(f.root, "data/runtime.sqlite"), new Journal(path.join(f.root, "agents")));
+  const reopened = new Store(
+    path.join(f.root, "data/runtime.sqlite"),
+    new Journal(path.join(f.root, "agents")),
+  );
   reopened.rebuild(["main"]);
   assert.equal(reopened.all("main").length, 0);
-  assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].length, 0);
+  assert.equal(
+    [...new Journal(path.join(f.root, "agents")).read("main")].length,
+    0,
+  );
   assert.equal(reopened.get("erase-events:main", null), null);
   assert.ok((await fs.stat(oldTrace)).isFile());
   reopened.close();
+});
+
+test("Responses Pi: reasoning + tools, callbacks, fresh session", async (t) => {
+  const f = await fixture(t);
+  let requests: any[] = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = "";
+    for await (const c of req) raw += c;
+    const payload = JSON.parse(raw);
+    requests.push(payload);
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    assert.equal(req.url, "/v1/responses");
+    assert.equal(payload.store, false);
+    assert.equal(payload.reasoning.effort, "low");
+    assert.equal(payload.previous_response_id, undefined);
+    assert.ok(
+      payload.tools.some(
+        (x: any) => x.type === "function" && x.name === "write",
+      ),
+    );
+    const emit = (type: string, data: any) =>
+      res.write(
+        "event: " +
+          type +
+          "\n" +
+          "data: " +
+          JSON.stringify({ type, ...data }) +
+          "\n\n",
+      );
+    const text = requests.length === 1 ? "好的。" : "完成了。";
+    const message = {
+      type: "message",
+      id: "msg_" + requests.length,
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text, annotations: [] }],
+    };
+    emit("response.output_item.added", {
+      output_index: 0,
+      item: { ...message, content: [] },
+    });
+    emit("response.output_text.delta", {
+      output_index: 0,
+      content_index: 0,
+      delta: text,
+    });
+    emit("response.output_item.done", { output_index: 0, item: message });
+    const output: any[] = [message];
+    if (requests.length === 1) {
+      const item = {
+        type: "function_call",
+        id: "fc_write",
+        call_id: "call_write",
+        name: "write",
+        arguments: JSON.stringify({
+          path: "result.txt",
+          content: "real tool output",
+        }),
+        status: "completed",
+      };
+      emit("response.output_item.added", {
+        output_index: 1,
+        item: { ...item, arguments: "" },
+      });
+      emit("response.function_call_arguments.delta", {
+        output_index: 1,
+        delta: item.arguments,
+      });
+      emit("response.output_item.done", { output_index: 1, item });
+      output.push(item);
+    }
+    emit("response.completed", {
+      response: {
+        id: "resp_" + requests.length,
+        status: "completed",
+        output,
+        usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 },
+      },
+    });
+    res.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((r) => server.close(() => r())));
+  const port = (server.address() as any).port;
+  process.env.TEST_MODEL_KEY = "fake-test-key";
+  const cfg = parseConfig({
+    ...f.config.current,
+    models: {
+      ...f.config.current.models,
+      main: {
+        ...f.config.current.models.main,
+        name: "gpt-6-luna",
+        protocol: "responses",
+        reasoning: "low",
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        apiKeyEnv: "TEST_MODEL_KEY",
+      },
+    },
+  });
+  const sent: any[] = [];
+  const host: ToolHost = {
+    db: f.db,
+    memory: new MemoryService(
+      f.config.agentRoot("main"),
+      "main",
+      f.db,
+      cfg,
+      llm,
+    ),
+    cfg,
+    agent: cfg.agents[0],
+    root: f.config.agentRoot("main"),
+    target: event().reply_target!,
+    send: (parts, target, key, action, msg, emoji, meta) =>
+      sent.push({ parts, meta }),
+    silent: () => {},
+    restartScheduler: async () => {},
+  };
+  const exec = new PiExecutor(host, llm, (e) =>
+    f.db.append({
+      protocol_version: 1,
+      agent_id: "main",
+      source: "layer4",
+      attachments: [],
+      data: {},
+      ...e,
+    }),
+  );
+  const context = {
+    system: "Test identity only.",
+    messages: [{ role: "user" as const, content: "Write the file." }],
+    memories: [],
+    target: event().reply_target!,
+    inputText: "Write the file.",
+  };
+  const result = await exec.run({
+    agentId: "main",
+    runId: "run-real",
+    context,
+    signal: new AbortController().signal,
+  });
+  assert.equal(result.reason, "complete", result.error ?? "");
+  assert.equal(
+    await fs.readFile(path.join(host.root, "workspace/result.txt"), "utf8"),
+    "real tool output",
+  );
+  assert.deepEqual(
+    sent.map((s) => s.parts[0].text),
+    ["好的。", "完成了。"],
+  );
+  assert.notEqual(sent[0].meta.responseId, sent[1].meta.responseId);
+  assert.equal(
+    f.db.all("main").filter((e) => e.type === "tool_result").length,
+    1,
+  );
+  assert.ok(
+    requests[1].input.some((m: any) => m.type === "function_call_output"),
+  );
+  const captured = JSON.parse(
+    await fs.readFile(
+      path.join(host.root, ".runtime/requests/run-real/1.json"),
+      "utf8",
+    ),
+  );
+  assert.ok(
+    captured.context.messages.some(
+      (m: any) =>
+        m.role === "system" &&
+        JSON.stringify(m).includes("Test identity only."),
+    ),
+  );
+  assert.ok(
+    captured.context.messages.some((m: any) => m.role === "toolResult"),
+  );
+  assert.ok(
+    captured.context.messages.some(
+      (m: any) => m.role === "system" && JSON.stringify(m).includes("write"),
+    ),
+  );
+
+  await exec.run({
+    agentId: "main",
+    runId: "new-run",
+    context: {
+      ...context,
+      messages: [{ role: "user", content: "New supplied context only" }],
+    },
+    signal: new AbortController().signal,
+  });
+  assert.ok(!JSON.stringify(requests[2]).includes("Write the file."));
+  assert.ok(JSON.stringify(requests[0]).includes("Test identity only."));
+});
+
+test("context deletion selects snapshots independently of history and summary", async (t) => {
+  const f = await fixture(t);
+  process.env.HINENI_TOKEN = "test-token-long-enough-for-authentication";
+  const runtime = new Runtime(f.config, f.db, async () => {}, llm);
+  const server = await servers(
+    f.config,
+    runtime,
+    new Scheduler(f.config, f.db),
+  );
+  f.cleanup.push(() => server.close());
+  const headers = { authorization: "Bearer " + process.env.HINENI_TOKEN };
+  f.db.append(event("retained"));
+  f.db.claim("main", [], "context-delete");
+  f.db.finish("context-delete", "complete");
+  f.db.set("history:main", { through: 1, summary: "keep" });
+  const base = path.join(f.config.agentRoot("main"), ".runtime");
+  const paths = [
+    "requests/context-delete/0.json",
+    "requests/context-delete/1.json",
+    "traces/context-delete.json",
+  ];
+  for (const p of paths) {
+    await fs.mkdir(path.dirname(path.join(base, p)), { recursive: true });
+    await fs.writeFile(path.join(base, p), "{}");
+  }
+  const url = "/v1/agents/main/runs/context-delete/context";
+  const remove = (payload: any) =>
+    server.api.inject({ method: "DELETE", url, headers, payload });
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url,
+        payload: { mode: "all" },
+      })
+    ).statusCode,
+    401,
+  );
+  assert.equal(
+    (await remove({ mode: "selected", request: "../0.json" })).statusCode,
+    400,
+  );
+  assert.equal(
+    (await remove({ mode: "selected", request: "999.json" })).statusCode,
+    404,
+  );
+  (runtime as any).active.set("main", {
+    controller: new AbortController(),
+    promise: Promise.resolve(),
+    runId: "context-delete",
+  });
+  assert.equal((await remove({ mode: "all" })).statusCode, 409);
+  (runtime as any).active.delete("main");
+  assert.equal(
+    (await remove({ mode: "selected", request: "0.json" })).json()
+      .deleted_snapshots,
+    1,
+  );
+  await assert.rejects(fs.stat(path.join(base, paths[0])));
+  assert.ok((await fs.stat(path.join(base, paths[1]))).isFile());
+  assert.ok((await fs.stat(path.join(base, paths[2]))).isFile());
+  assert.deepEqual(
+    (await server.api.inject({ url, headers })).json().requests,
+    ["1.json"],
+  );
+  assert.equal((await remove({ mode: "all" })).json().deleted_snapshots, 2);
+  assert.equal(
+    (await server.api.inject({ url, headers })).json().unavailable,
+    true,
+  );
+  assert.equal(f.db.all("main").length, 1);
+  assert.equal(f.db.get("history:main", { summary: "" }).summary, "keep");
+  assert.ok(
+    f.db.db.prepare("SELECT id FROM runs WHERE id=?").get("context-delete"),
+  );
+});
+
+test("auxiliary JSON and compaction use selected protocol; Responses rejects incomplete output", async (t) => {
+  const { OpenAIModels } = await import("../src/shared/models.js");
+  const seen: any[] = [];
+  let incomplete = false;
+  const server = http.createServer(async (req, res) => {
+    let raw = "";
+    for await (const c of req) raw += c;
+    const body = JSON.parse(raw);
+    if (body.text?.format?.type === "json_object") assert.match(JSON.stringify(body.input), /json/i);
+    seen.push({ url: req.url, body });
+    const text =
+      body.text || body.response_format ? '{"queries":["test"]}' : "summary";
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify(
+        req.url === "/v1/responses"
+          ? {
+              id: "resp_test",
+              object: "response",
+              status: incomplete ? "incomplete" : "completed",
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text, annotations: [] }],
+                },
+              ],
+            }
+          : {
+              choices: [{ message: { content: text }, finish_reason: "stop" }],
+            },
+      ),
+    );
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise<void>((r) => server.close(() => r())));
+  for (const protocol of ["responses", "chat-completions"] as const) {
+    const model = {
+      protocol,
+      name: "mock",
+      baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
+    };
+    const cfg = parseConfig({
+      agents: [{ id: "main", name: "Main", defaultTarget: {channel: "local", conversation: "owner"} }],
+      channels: [{id: "local", type: "webhook"}],
+      models: { main: model, fast: model },
+    });
+    const llm = new OpenAIModels(cfg, { OPENAI_API_KEY: "fake" });
+    assert.deepEqual(await llm.json("query", {}), { queries: ["test"] });
+    assert.equal(await llm.summarize("old text", 1000), "summary");
+    for (const request of seen.slice(-2)) {
+      assert.equal(
+        request.url,
+        protocol === "responses" ? "/v1/responses" : "/v1/chat/completions",
+      );
+      if (protocol === "responses") {
+        assert.equal(request.body.store, false);
+        assert.equal(request.body.previous_response_id, undefined);
+      }
+    }
+    if (protocol === "responses") {
+      incomplete = true;
+      await assert.rejects(llm.json("query", {}), /Incomplete/);
+      await assert.rejects(llm.summarize("old", 1000), /incomplete/);
+      incomplete = false;
+    }
+  }
 });
