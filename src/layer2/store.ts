@@ -244,18 +244,6 @@ export class Store {
         ? [e.data.result_file]
         : [],
     );
-    const runs = all
-      ? (this.db
-          .prepare("SELECT id FROM runs WHERE agent_id=?")
-          .all(agent) as Array<{ id: string }>).map((x) => x.id)
-      : [];
-    const copied = all
-      ? this.journal.snapshotsForRuns(agent, runs)
-      : this.journal.copiedSnapshots(
-          agent,
-          selectedRows.map((e) => e.event_id),
-          selectedRows.map((e) => e.text),
-        );
     const deletedCount = all
       ? Number(
           (this.db
@@ -267,7 +255,7 @@ export class Store {
       agent,
       all,
       ids: selectedRows.map((e) => e.event_id),
-      files: [...new Set([...attachmentFiles, ...toolFiles, ...copied])],
+      files: [...new Set([...attachmentFiles, ...toolFiles])],
       attachments,
       replacements,
     };
@@ -282,7 +270,11 @@ export class Store {
     const ids = new Set(job.ids);
     if (job.all) this.journal?.clear(job.agent);
     else this.journal?.prune(job.agent, ids, new Map(job.replacements));
-    this.journal?.eraseRelatedFiles(job.agent, job.files);
+    // Older unfinished erase intents may mention request snapshots. Preserve them too.
+    this.journal?.eraseRelatedFiles(
+      job.agent,
+      job.files.filter((file) => !file.includes(path.sep + ".runtime" + path.sep)),
+    );
     this.db.exec("BEGIN IMMEDIATE");
     try {
       if (job.all) {

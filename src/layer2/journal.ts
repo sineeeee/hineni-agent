@@ -104,58 +104,15 @@ export class Journal {
       const relative = path.relative(root, resolved).split(path.sep);
       const attachment = relative[0] === "attachments";
       const tool = relative[0] === "history" && relative[1] === "tools";
-      const snapshot =
-        relative[0] === ".runtime" &&
-        ["requests", "traces"].includes(relative[1]);
       if (
         relative.some((p) => p === ".." || p === "") ||
-        !(attachment || tool || snapshot)
+        !(attachment || tool)
       )
         throw Error("Record path escapes history storage");
       fs.rmSync(resolved, { force: true });
       if (attachment)
         fs.rmSync(resolved + ".json", { force: true });
     }
-  }
-  copiedSnapshots(agent: string, eventIds: string[], texts: string[]) {
-    const root = path.join(this.root(agent), ".runtime");
-    const needles = [...eventIds, ...texts.filter((x) => x.length >= 20)];
-    const found: string[] = [];
-    const scan = (dir: string) => {
-      if (!fs.existsSync(dir)) return;
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.isSymbolicLink()) continue;
-        const file = path.join(dir, entry.name);
-        if (entry.isDirectory()) scan(file);
-        else if (entry.name.endsWith(".json")) {
-          const content = fs.readFileSync(file, "utf8");
-          if (needles.some((needle) => content.includes(needle))) found.push(file);
-        }
-      }
-    };
-    scan(path.join(root, "requests"));
-    scan(path.join(root, "traces"));
-    return found;
-  }
-  /** An all-history deletion owns every saved request for its recorded runs. */
-  snapshotsForRuns(agent: string, runs: string[]) {
-    const root = path.join(this.root(agent), ".runtime");
-    const files: string[] = [];
-    for (const run of runs) {
-      if (!/^[A-Za-z0-9_-]{1,200}$/.test(run))
-        throw Error("Invalid recorded run id");
-      const requests = path.join(root, "requests", run);
-      if (fs.existsSync(requests))
-        files.push(
-          ...fs
-            .readdirSync(requests)
-            .filter((x) => x.endsWith(".json"))
-            .map((x) => path.join(requests, x)),
-        );
-      const trace = path.join(root, "traces", run + ".json");
-      if (fs.existsSync(trace)) files.push(trace);
-    }
-    return files;
   }
   pruneSnapshots(
     agent: string,

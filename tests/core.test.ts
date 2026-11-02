@@ -1902,7 +1902,7 @@ test("emergency compaction removes the oversized original", async (t) => {
   assert.ok(!JSON.stringify(body).includes("oversized original"));
 });
 
-test("selected deletion removes only chosen second-layer records and copied files", async (t) => {
+test("selected deletion removes only chosen second-layer records and preserves context files", async (t) => {
   const f = await fixture(t);
   const root = f.config.agentRoot("main");
   const file = path.join(root, "attachments", "first");
@@ -1918,6 +1918,9 @@ test("selected deletion removes only chosen second-layer records and copied file
   await fs.mkdir(path.dirname(related), { recursive: true });
   await fs.writeFile(related, JSON.stringify({ history: "remove-me unique deleted history text 123" }));
   await fs.writeFile(unrelated, JSON.stringify({ history: "keep-me unrelated retained message" }));
+  const request = path.join(root, ".runtime", "requests", "test-run", "0.json");
+  await fs.mkdir(path.dirname(request), { recursive: true });
+  await fs.writeFile(request, JSON.stringify({ history: "remove-me" }));
   const result = f.db.eraseEvents("main", ["remove-me"]);
   assert.equal(result.deleted_events, 1);
   assert.deepEqual(f.db.all("main").map((e) => e.event_id), ["keep-me"]);
@@ -1925,8 +1928,9 @@ test("selected deletion removes only chosen second-layer records and copied file
   assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "independent summary");
   assert.equal(f.db.getAttachment("main", "first"), undefined);
   await assert.rejects(fs.stat(file));
-  await assert.rejects(fs.stat(related));
+  assert.ok((await fs.stat(related)).isFile());
   assert.ok((await fs.stat(unrelated)).isFile());
+  assert.ok((await fs.stat(request)).isFile());
   assert.equal(f.db.get("history-revision:main", 0), 1);
   f.db.clearSummary("main");
   assert.deepEqual(f.db.get("history:main", {}), {});
@@ -1967,12 +1971,16 @@ test("all-history deletion is scoped to one agent and recovery cannot restore it
   const trace = path.join(f.config.agentRoot("main"), ".runtime/traces/all-run.json");
   await fs.mkdir(path.dirname(trace), { recursive: true });
   await fs.writeFile(trace, JSON.stringify({ history: "main-event" }));
+  const request = path.join(f.config.agentRoot("main"), ".runtime/requests/all-run/0.json");
+  await fs.mkdir(path.dirname(request), { recursive: true });
+  await fs.writeFile(request, JSON.stringify({ history: "main-event" }));
   f.db.eraseEvents("main", "all");
   assert.equal(f.db.all("main").length, 0);
   assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].length, 0);
   assert.equal(f.db.all("other").length, 1);
   assert.equal(f.db.get("history:main", { through: 0, summary: "" }).summary, "separate summary");
-  await assert.rejects(fs.stat(trace));
+  assert.ok((await fs.stat(trace)).isFile());
+  assert.ok((await fs.stat(request)).isFile());
   assert.equal(f.db.db.prepare("SELECT id FROM runs WHERE agent_id=?").get("main"), undefined);
   assert.equal(await fs.readFile(persona, "utf8"), before);
   f.db.rebuild(["main", "other"]);
@@ -2015,11 +2023,16 @@ test("an interrupted deletion resumes before journal recovery", async (t) => {
   (f.db as any).journal.prune = () => { throw Error("simulated interruption"); };
   assert.throws(() => f.db.eraseEvents("main", ["crash-delete"]), /simulated interruption/);
   (f.db as any).journal.prune = original;
-  assert.ok(f.db.get("erase-events:main", null));
+  const oldTrace = path.join(f.config.agentRoot("main"), ".runtime/traces/old-intent.json");
+  await fs.mkdir(path.dirname(oldTrace), { recursive: true });
+  await fs.writeFile(oldTrace, JSON.stringify({ history: "crash-delete" }));
+  const pending = f.db.get("erase-events:main", { files: [] as string[] });
+  f.db.set("erase-events:main", { ...pending, files: [oldTrace] });
   const reopened = new Store(path.join(f.root, "data/runtime.sqlite"), new Journal(path.join(f.root, "agents")));
   reopened.rebuild(["main"]);
   assert.equal(reopened.all("main").length, 0);
   assert.equal([...new Journal(path.join(f.root, "agents")).read("main")].length, 0);
   assert.equal(reopened.get("erase-events:main", null), null);
+  assert.ok((await fs.stat(oldTrace)).isFile());
   reopened.close();
 });
