@@ -1,5 +1,7 @@
 /** Editable scheduling policy. POST events; the second layer handles interruption and routing. */
 import fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -83,19 +85,60 @@ function cron(expression: string, job: () => Promise<void>) {
 }
 const randomGreeting =
   "我想把自己感兴趣的一个小想法分享给对方。直接讲内容，让这个想法自己成立；讲完就好，不用附带对对方生活的安排或要求。对方没有发来新消息，也不用对方接话来完成这次分享。没有新内容就安静。";
+const runFile = promisify(execFile);
+async function leisureEvent(id: string, manual = false) {
+  const dir = path.join(store.agentRoot(id), "workspace", "moyu");
+  const dice = path.join(dir, "dice.py");
+  if (!fs.existsSync(dice)) {
+    if (manual) throw Error("Install workspace/moyu first");
+    return event(id, randomGreeting, "random_chat");
+  }
+  const { stdout } = await runFile(
+    "python3",
+    [dice, manual ? "next" : "opportunity"],
+    {
+      timeout: 10000,
+      env: { ...process.env, MOYU_TIMEZONE: cfg.scheduler.timezone },
+    },
+  );
+  const choice = JSON.parse(stdout);
+  if (choice.kind === "quiet") return;
+  if (choice.kind === "chat") return event(id, randomGreeting, "random_chat");
+  if (
+    choice.kind !== "moyu" ||
+    !Array.isArray(choice.sources) ||
+    !choice.sources.length
+  )
+    throw Error("Invalid leisure decision");
+  const ids = choice.sources.map((s: any) => s.id);
+  if (
+    !ids.every((s: unknown) => typeof s === "string" && /^[a-z0-9_-]+$/.test(s))
+  )
+    throw Error("Invalid source codes");
+  const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
+  const command = ["python3", path.join(dir, "fetch.py"), ...ids]
+    .map(quote)
+    .join(" ");
+  await event(
+    id,
+    `忽然想出去逛逛，看看有没有自己喜欢、也想带回来和对方聊的东西。这不是对方发来的消息。先阅读 ${path.join(dir, "SOP.md")}，再运行 ${command}。本轮来源已选好：${choice.sources.map((s: any) => s.name).join("、")}。从真实内容里挑一两件自己有感受的，自然说就好；没有值得分享的就安静。`,
+    "moyu_browse",
+  );
+}
 const onceIndex = process.argv.indexOf("--once");
 if (onceIndex !== -1) {
   const kind = process.argv[onceIndex + 1];
   const agentIndex = process.argv.indexOf("--agent");
   const id = agentIndex === -1 ? agentId : process.argv[agentIndex + 1];
   if (
-    kind !== "random_chat" ||
+    !["random_chat", "moyu"].includes(kind) ||
     !id ||
     !cfg.agents.some((a: any) => a.id === id && a.enabled)
   )
-    throw Error("Usage: --once random_chat --agent <enabled agent id>");
-  await event(id, randomGreeting, "random_chat");
-  console.log("One random_chat event accepted; no timer started.");
+    throw Error("Usage: --once random_chat|moyu --agent <enabled agent id>");
+  if (kind === "moyu") await leisureEvent(id, true);
+  else await event(id, randomGreeting, "random_chat");
+  console.log(`One ${kind} event accepted; no timer started.`);
 } else {
   for (const agent of cfg.agents.filter((a: any) => a.enabled)) {
     const effective = agentConfig(cfg, agent);
@@ -142,7 +185,7 @@ if (onceIndex !== -1) {
                 hour >= cfg.scheduler.activeStart &&
                 hour < cfg.scheduler.activeEnd
               )
-                await event(agent.id, randomGreeting, "random_chat");
+                await leisureEvent(agent.id);
             } catch (e) {
               console.error(String(e));
             } finally {

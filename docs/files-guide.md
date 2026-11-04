@@ -247,6 +247,32 @@ tasks 数组：id 为唯一编号，at 为带时区的绝对时间，text 为内
 
 实现位置：`src/layer4/pi.ts`；`src/layer4/tools.ts`。
 
+## 摸鱼来源与概率
+
+路径：`agents/<agent_id>/workspace/moyu/config.json`。
+
+摸鱼目录：config.json 控制来源开关、摸鱼/纯聊/安静权重、日上限和抽站数量；SOP.md 解释参数与行为；dice.py 抽签，fetch.py 读取公开源或OpenCLI，connect.py 检查并启停来源。state.json只保存当天额度和最近抽站，last-edition.json/fetch-log.jsonl是抓取结果，不代表已发送。
+
+**谁更新、何时生效。** config.json 和 SOP.md 保存后下次机会读取；间隔、活跃时段和总开关在个人config.yaml的scheduler，需重启定时脚本。社交源启用前先用connect.py probe验证登录；登录资料保存在摸鱼目录browser/.profile，不存进此配置。完整操作见运行与迁移文档的摸鱼章节。
+
+1. 个人schedule.ts每次随机机会调用dice.py，选择moyu/chat/quiet。quiet不提交事件；其他选择只向同一个第二层接口提交内部事件。
+2. 摸鱼事件提示主agent读SOP.md并通过Bash执行fetch.py；读取结果进入普通工具记录，不新增Skill或独立聊天。
+3. connect.py enable 来源代码先验证非空内容再改开关；disable停用。config.json每次重新读取，专用浏览器由browser.py启动，读取端口在browser.port。
+
+|字段|用途与影响|
+|---|---|
+|`dailyOpportunities`|当天自动机会总上限，包含静默抽签；手动触发不占额度。|
+|`weights`|moyu/chat/quiet相对权重；分别是出去逛、原有纯聊天、不提交事件。|
+|`sourceCountMin`|一次摸鱼最少抽几个来源。|
+|`sourceCountMax`|一次摸鱼最多抽几个来源，最多8个。|
+|`avoidRecentRolls`|优先避开最近几次抽过的来源，来源不足才复用。|
+|`itemsPerSource`|每站最多读取多少候选，不是发给用户的条数。|
+|`requestTimeoutSeconds`|公开API/RSS每次请求的秒数上限。|
+|`browser`|port为专用浏览器的本机端口，executable为空自动找当前系统Chrome；资料在browser/.profile。换端口后重启浏览器。|
+|`sources`|每站name/ enabled/ kind，公开源url；OpenCLI源platform/command/timeoutSeconds。未验证的账号源保持关闭。|
+
+实现位置：`scripts/schedule.ts · leisureEvent`；`templates/activities/moyu`。
+
 ## 完整手册
 
 路径：`docs/manual.md`。

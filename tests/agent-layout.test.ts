@@ -533,3 +533,54 @@ test("saved personal configuration survives fresh load and stale pre-restart edi
   assert.throws(() => restart.save(invalid, restart.revision));
   assert.equal(await fs.readFile(config.file, "utf8"), bytes);
 });
+
+test("manual leisure submits one normal internal event without changing automatic quota", async (t) => {
+  const { root } = await setup(t);
+  const dir = path.join(root, "agents/main/workspace/moyu");
+  await fs.cp(path.resolve("templates/activities/moyu"), dir, {
+    recursive: true,
+    filter: (p) => !p.includes("__pycache__"),
+  });
+  const received: any[] = [];
+  const server = http.createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    received.push({ url: req.url, body: JSON.parse(body) });
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address() as import("node:net").AddressInfo;
+  await promisify(execFile)(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      path.join(root, "agents/main/schedule.ts"),
+      "--once",
+      "moyu",
+      "--agent",
+      "main",
+    ],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        HINENI_ROOT: root,
+        HINENI_AGENT_ID: "main",
+        HINENI_API: `http://127.0.0.1:${address.port}`,
+      },
+    },
+  );
+  assert.equal(received.length, 1);
+  assert.equal(received[0].url, "/v1/events");
+  assert.equal(received[0].body.agent_id, "main");
+  assert.equal(received[0].body.type, "internal_event");
+  assert.equal(received[0].body.data.kind, "moyu_browse");
+  assert.match(received[0].body.text, /SOP\.md/);
+  assert.match(received[0].body.text, /fetch\.py/);
+  const state = JSON.parse(
+    await fs.readFile(path.join(dir, "state.json"), "utf8"),
+  );
+  assert.equal(state.opportunities, 0);
+});

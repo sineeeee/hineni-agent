@@ -1,0 +1,132 @@
+{
+  "dailyOpportunities": 5,
+  "weights": {
+    "moyu": 65,
+    "chat": 20,
+    "quiet": 15
+  },
+  "sourceCountMin": 2,
+  "sourceCountMax": 3,
+  "avoidRecentRolls": 1,
+  "itemsPerSource": 4,
+  "requestTimeoutSeconds": 10,
+  "sources": {
+    "a": {
+      "name": "X 时间线",
+      "enabled": false,
+      "note": "启动专用browser.py并在窗口登录后，运行 connect.py enable a 验证并启用",
+      "kind": "opencli",
+      "platform": "twitter",
+      "command": "timeline",
+      "timeoutSeconds": 60
+    },
+    "b": {
+      "name": "X 热榜",
+      "enabled": false,
+      "note": "启动专用browser.py并在窗口登录后，运行 connect.py enable b 验证并启用",
+      "kind": "opencli",
+      "platform": "twitter",
+      "command": "trending",
+      "timeoutSeconds": 60
+    },
+    "c": {
+      "name": "Reddit",
+      "enabled": false,
+      "note": "启动专用browser.py并在窗口登录后，运行 connect.py enable c 验证并启用",
+      "kind": "opencli",
+      "platform": "reddit",
+      "command": "popular",
+      "timeoutSeconds": 60
+    },
+    "d": {
+      "name": "Hacker News",
+      "enabled": true,
+      "kind": "hn",
+      "url": "https://hacker-news.firebaseio.com/v0/topstories.json"
+    },
+    "e": {
+      "name": "Lobsters",
+      "enabled": true,
+      "kind": "lobsters",
+      "url": "https://lobste.rs/hottest.json"
+    },
+    "h": {
+      "name": "V2EX",
+      "enabled": true,
+      "kind": "v2ex",
+      "url": "https://www.v2ex.com/api/topics/hot.json"
+    },
+    "i": {
+      "name": "Product Hunt",
+      "enabled": true,
+      "note": "公开Atom订阅",
+      "kind": "rss",
+      "url": "https://www.producthunt.com/feed"
+    },
+    "l": {
+      "name": "豆瓣小组",
+      "enabled": false,
+      "note": "待验证登录和正文读取"
+    },
+    "m": {
+      "name": "Bluesky 热门",
+      "enabled": true,
+      "kind": "bluesky",
+      "url": "https://public.api.bsky.app/xrpc/app.bsky.feed.getFeed?feed=at%3A%2F%2Fdid%3Aplc%3Az72i7hdynmk6r22z27h6tvur%2Fapp.bsky.feed.generator%2Fwhats-hot&limit=20"
+    },
+    "n": {
+      "name": "Tildes",
+      "enabled": true,
+      "note": "公开Atom订阅",
+      "kind": "rss",
+      "url": "https://tildes.net/topics.atom"
+    },
+    "o": {
+      "name": "MetaFilter",
+      "enabled": true,
+      "note": "公开RSS订阅",
+      "kind": "rss",
+      "url": "https://feeds.feedburner.com/Metafilter"
+    },
+    "p": {
+      "name": "Colossal",
+      "enabled": true,
+      "kind": "rss",
+      "url": "https://www.thisiscolossal.com/feed/"
+    },
+    "q": {
+      "name": "Neatorama",
+      "enabled": true,
+      "kind": "rss",
+      "url": "https://www.neatorama.com/feed/"
+    },
+    "xhs": {
+      "name": "小红书推荐",
+      "enabled": false,
+      "kind": "opencli",
+      "platform": "xiaohongshu",
+      "command": "feed",
+      "timeoutSeconds": 60,
+      "note": "浏览器登录后 connect.py enable xhs"
+    },
+    "ig": {
+      "name": "Instagram 推荐",
+      "enabled": false,
+      "kind": "opencli",
+      "platform": "instagram",
+      "command": "explore",
+      "timeoutSeconds": 60,
+      "note": "浏览器登录后 connect.py enable ig；摘要不保证带帖子链接或图片正文"
+    },
+    "threads": {
+      "name": "Threads",
+      "enabled": false,
+      "kind": "pending",
+      "note": "OpenCLI暂无适配器；独立浏览器MCP候选 bintangtimurlangit/threads-mcp，暂未安装，不参与抽签"
+    }
+  },
+  "browser": {
+    "port": 19222,
+    "executable": ""
+  }
+}

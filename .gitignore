@@ -13,3 +13,7 @@ coverage/
 .DS_Store
 *.sqlite*
 *.db
+
+# Python helpers may be run directly.
+__pycache__/
+*.pyc

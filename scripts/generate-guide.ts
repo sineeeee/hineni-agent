@@ -114,6 +114,7 @@ for (const name of [
   "agents/<agent_id>/skills/personal-memory/SKILL.md",
   "agents/<agent_id>/skills/dream-diary/SKILL.md",
   "agents/<agent_id>/workspace/工作文件",
+  "agents/<agent_id>/workspace/moyu/config.json",
   "docs/manual.md",
   "docs/configuration-reference.md",
   "docs/internals.md",
