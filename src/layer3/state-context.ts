@@ -33,40 +33,70 @@ export function selectStateContext(
   state: State,
   cfg: Config,
   random: () => number = Math.random,
+  observe?: (
+    key: "thoughts" | "focus",
+    result: {
+      eligible: boolean;
+      probability: number;
+      draw: number | null;
+      selected: boolean;
+    },
+  ) => void,
 ): StateSelection {
+  const choose = (
+    key: "thoughts" | "focus",
+    eligible: boolean,
+    probability: number,
+  ) => {
+    let draw: number | null = null;
+    const selected =
+      eligible &&
+      chance(probability, () => {
+        draw = random();
+        return draw;
+      });
+    observe?.(key, { eligible, probability, draw, selected });
+    return selected;
+  };
   return {
-    thoughts:
+    thoughts: choose(
+      "thoughts",
       cfg.state.enabled &&
-      cfg.state.thoughtContextItems > 0 &&
-      state.thoughts.length > 0 &&
-      chance(cfg.state.thoughtContextProbability, random),
-    focus:
-      cfg.state.enabled &&
-      cfg.state.focusMax > 0 &&
-      state.focus.length > 0 &&
-      chance(cfg.state.focusContextProbability, random),
+        cfg.state.thoughtContextItems > 0 &&
+        state.thoughts.length > 0,
+      cfg.state.thoughtContextProbability,
+    ),
+    focus: choose(
+      "focus",
+      cfg.state.enabled && cfg.state.focusMax > 0 && state.focus.length > 0,
+      cfg.state.focusContextProbability,
+    ),
   };
 }
 /** Only a short interpretation reaches the main model; full numbers stay in state.json. */
-export function stateContext(
+export function stateContextSteps(
   state: State,
   cfg: Config,
   now = Date.now(),
   mapping: PromptMapping = promptMappingDefaults,
   selection: StateSelection = { thoughts: true, focus: true },
-): string {
+) {
   const gap = state.conversation_context as
     { seconds_since_last_response?: number | null } | undefined;
-  const lines = [
+  const sections: Array<{ key: string; prompt: string }> = [];
+  const add = (key: string, prompt: string) => sections.push({ key, prompt });
+  add(
+    "time",
     fillTemplate(mapping.text.now, {
       time: localMoment(now, cfg.scheduler.timezone),
     }),
-  ];
+  );
   if (cfg.state.gap)
-    lines.push(gapContext(gap?.seconds_since_last_response, mapping));
+    add("gap", gapContext(gap?.seconds_since_last_response, mapping));
   if (cfg.state.enabled) {
     const mood = Math.round(state.mood);
-    lines.push(
+    add(
+      "mood",
       fillTemplate(mapping.mood.template, {
         label: bandLabel(mood, mapping.mood.bands),
       }),
@@ -87,7 +117,8 @@ export function stateContext(
         }),
       );
     if (emotions.length)
-      lines.push(
+      add(
+        "emotions",
         fillTemplate(mapping.emotions.template, {
           items: emotions.join(mapping.emotions.separator),
         }),
@@ -116,7 +147,8 @@ export function stateContext(
         }),
       );
     if (drives.length)
-      lines.push(
+      add(
+        "drives",
         fillTemplate(mapping.drives.template, {
           items: drives.join(mapping.drives.separator),
         }),
@@ -134,7 +166,8 @@ export function stateContext(
             ),
           })
         : mapping.cause.unknown;
-      lines.push(
+      add(
+        "cause",
         fillTemplate(mapping.cause.template, {
           when,
           cause: state.cause.replace(/[。！？.!?]+$/, ""),
@@ -145,13 +178,15 @@ export function stateContext(
       0,
       cfg.state.thoughtContextItems,
     ))
-      lines.push(
+      add(
+        "thoughts",
         fillTemplate(mapping.text.thought, {
           text: cut(thought.text, cfg.state.thoughtContextTokens),
         }),
       );
     if (selection.focus && cfg.state.focusMax > 0 && state.focus.length)
-      lines.push(
+      add(
+        "focus",
         fillTemplate(mapping.text.focus, {
           items: state.focus
             .slice(0, cfg.state.focusMax)
@@ -159,5 +194,16 @@ export function stateContext(
         }),
       );
   }
-  return cut(lines.join("\n"), cfg.context.stateTokens);
+  const raw = sections.map((x) => x.prompt).join("\n");
+  return { sections, raw, prompt: cut(raw, cfg.context.stateTokens) };
+}
+
+export function stateContext(
+  state: State,
+  cfg: Config,
+  now = Date.now(),
+  mapping: PromptMapping = promptMappingDefaults,
+  selection: StateSelection = { thoughts: true, focus: true },
+): string {
+  return stateContextSteps(state, cfg, now, mapping, selection).prompt;
 }

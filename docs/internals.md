@@ -464,3 +464,9 @@ Telegram 收到 message 后，在入站允许列表检查之前更新 `telegram-
 配置说明分为三份展示资料：guide.ts 保留逐项实现约束，learning.ts 用具体例子解释含义与调整结果，processing-guide.ts 解释消费函数、处理顺序、读写位置和下一轮影响。管理 API 与生成文档共用这些资料，不把它们注入 agent prompt。字段与文件的绝对路径由当前 ConfigStore 动态返回。
 
 表达风格文本移到 config/style-prompt.ts 的 buildStylePrompt，ContextBuilder 与管理页预览使用同一个函数；仅提取原逻辑，不改变生成文本或模型行为。操作说明改为默认收起的问号，不更改保存/重启语义。
+
+### 第三层编排过程的只读预览
+
+admin/context-preview.ts通过MemoryService.inspectionSession取得冻结时间下的原文/索引/状态副本，复用正式recall、query、重排、时间邻居、联想和裁切观察点。prompt-assembly.ts集中生成正式ContextBuilder与试算共用的稳定system、背景及预算；stateContextSteps输出同一状态映射的分段，stateContext只取它的最终字符串。selectStateContext的可选观察器记录命名抽签结果，不改变正式抽签次数。
+
+History.messages的omitHistory选项只跳过历史checkpoint和记录，继续复用当前输入的时间/位置格式。试算不调用History.view/unansweredBatch，不写任何运行记录或trace，不调用afterRun。完整预览包括被跳过的状态小段及真实辅助请求，编排顺序由共用函数给出；不要为UI重新写一份提示词映射。tests/context-preview.test.ts逐字对比无历史时正式编排与预览，检查全量持久化数据不变、历史正文读取被禁止及概率分支。

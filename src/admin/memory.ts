@@ -1,3 +1,4 @@
+import { contextPreview } from "./context-preview.js";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Runtime } from "../layer2/runtime.js";
@@ -22,7 +23,8 @@ export function memoryRoutes(app: FastifyInstance, runtime: Runtime) {
       const body = z
         .object({
           query: z.string().trim().min(1).max(20000),
-          mode: z.enum(["recall", "search"]).default("recall"),
+          mode: z.enum(["recall", "search", "context"]).default("recall"),
+          trigger: z.enum(["user", "random_chat"]).default("user"),
         })
         .strict()
         .parse(req.body);
@@ -33,7 +35,14 @@ export function memoryRoutes(app: FastifyInstance, runtime: Runtime) {
           .send({ error: "该agent已有一次召回试算，请等待完成。" });
       active.add(req.params.agent);
       try {
-        return await service.simulateRecall(body.query, body.mode);
+        return body.mode === "context"
+          ? await contextPreview(
+              runtime,
+              req.params.agent,
+              body.query,
+              body.trigger,
+            )
+          : await service.simulateRecall(body.query, body.mode);
       } finally {
         active.delete(req.params.agent);
       }

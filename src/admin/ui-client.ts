@@ -1,3 +1,4 @@
+import { promptFlowClient } from "./prompt-flow-client.js";
 import { memoryClient } from "./memory-client.js";
 import { jsonViewerClient } from "./json-viewer.js";
 import { fieldHelp } from "../config/help.js";
@@ -12,6 +13,7 @@ export const client =
   buildStylePrompt.toString() +
   ";\n" +
   jsonViewerClient +
+  promptFlowClient +
   memoryClient +
   String.raw`function replaceContent(node,...children){node.replaceChildren(...children.filter(x=>x!==null&&x!==undefined));}
 const $=id=>document.getElementById(id);

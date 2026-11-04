@@ -159,19 +159,24 @@ export class History {
     agent: string,
     batch: Event[],
     beforeBatch?: ModelMessage,
+    options: { omitHistory?: boolean } = {},
   ): ModelMessage[] {
-    const checkpoint = this.db.get(`history:${agent}`, {
-      through: 0,
-      summary: "",
-    });
+    const checkpoint = options.omitHistory
+      ? { through: 0, summary: "" }
+      : this.db.get(`history:${agent}`, {
+          through: 0,
+          summary: "",
+        });
     const ids = new Set(batch.map((e) => e.event_id));
-    const events = this.db
-      .all(agent, checkpoint.through)
-      .filter(
-        (e) =>
-          !["delivery_result", "run_finished"].includes(e.type) &&
-          !ids.has(e.event_id),
-      );
+    const events = options.omitHistory
+      ? []
+      : this.db
+          .all(agent, checkpoint.through)
+          .filter(
+            (e) =>
+              !["delivery_result", "run_finished"].includes(e.type) &&
+              !ids.has(e.event_id),
+          );
     const out: ModelMessage[] = checkpoint.summary
       ? [
           {

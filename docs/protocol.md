@@ -146,6 +146,8 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 
 - GET /v1/agents/:agent/memory/inspect：返回原文、实际索引（省略向量矩阵）、计算因素、来源位置和参数；无模型调用。
 - GET /v1/agents/:agent/memory/inspect?id=<memory_id>：返回该条原文及包含vectors的完整实际索引；不存在的编号报错。
-- POST /v1/agents/:agent/memory/simulate：正文为{"query":"检索材料","mode":"recall"}；mode可为recall或search，默认recall。query去空白后1～20000字符，未知字段拒绝。同agent正在试算时返回409。
+- POST /v1/agents/:agent/memory/simulate：正文为{"query":"检索材料","mode":"recall"}；mode可为recall、search或context，默认recall；可选trigger为user或random_chat，默认user，仅context模式使用。query去空白后1～20000字符，未知字段拒绝。同agent正在试算时返回409。
 
 返回query原材料和扩展、实际辅助调用记录、所有条目的相关性/状态贡献/候选和选中排名、后续联想/预算结果及output。仅显式POST可能产生模型费用；不创建事件、不调用主模型、不写真实记忆/索引/状态或召回计数。日志可以记录诊断信息。检索材料不自动附最近对话，随机分支按本次独立抽签。
+
+context模式返回stages（id/group/title/kind/prompt/input/cumulative/explanation/parameters）、context（第三层system与messages）、layout（含历史省略占位）及原有评分/调用字段。省略历史和此前输入、附件，不触发主模型；状态/索引/配置/历史均只读。按统一开始时间计算，辅助调用与概率可能与稍后正式运行不同。stages里的辅助请求和中间评分不是全部发给主模型的内容，kind明确区分。

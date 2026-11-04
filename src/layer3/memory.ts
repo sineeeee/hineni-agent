@@ -68,6 +68,7 @@ export class MemoryService {
     query?: (value: any) => void;
     search?: (value: any) => void;
     recall?: (value: any) => void;
+    phase?: (value: any) => void;
   };
   private now() {
     return this.preview?.now ?? Date.now();
@@ -113,24 +114,25 @@ export class MemoryService {
       return this.validItems;
     }
   }
-  async state(): Promise<State> {
-    const now = this.now();
-    const s = this.preview
-      ? structuredClone(this.preview.state)
-      : await readJson<State>(path.join(this.root, "state.json"), {
-          updated_at: new Date(now).toISOString(),
-          mood: this.cfg.state.baseline,
-          emotions: {},
-          drives: Object.fromEntries(
-            Object.entries(this.cfg.drives)
-              .filter(([, d]) => d.enabled)
-              .map(([k, d]) => [k, d.baseline]),
-          ),
-          cause: "",
-          thoughts: [],
-          focus: [],
-          activation: {},
-        });
+  async state(source?: State, now = this.now()): Promise<State> {
+    const s = source
+      ? structuredClone(source)
+      : this.preview
+        ? structuredClone(this.preview.state)
+        : await readJson<State>(path.join(this.root, "state.json"), {
+            updated_at: new Date(now).toISOString(),
+            mood: this.cfg.state.baseline,
+            emotions: {},
+            drives: Object.fromEntries(
+              Object.entries(this.cfg.drives)
+                .filter(([, d]) => d.enabled)
+                .map(([k, d]) => [k, d.baseline]),
+            ),
+            cause: "",
+            thoughts: [],
+            focus: [],
+            activation: {},
+          });
     const hours = Math.max(0, (now - Date.parse(s.updated_at)) / 3600000);
     s.mood =
       this.cfg.state.baseline +
@@ -576,6 +578,10 @@ export class MemoryService {
     const found = await this.search(q, false, this.cfg.memory.maxItems, signal);
     const all = await this.items();
     const reasons = Object.fromEntries(found.map((m) => [m.id, "relevant"]));
+    this.observation?.phase?.({
+      key: "retrieval",
+      items: structuredClone(found),
+    });
     if (found.length) {
       const anchor = found[0];
       const neighbors = all
@@ -601,14 +607,20 @@ export class MemoryService {
       found.push(...neighbors);
       for (const m of neighbors) reasons[m.id] = "temporal";
     }
+    this.observation?.phase?.({
+      key: "temporal",
+      items: structuredClone(found),
+      reasons: { ...reasons },
+    });
     const round = this.db.get(`recallRound:${this.agentId}`, 0) + 1;
     if (!this.preview) this.db.set(`recallRound:${this.agentId}`, round);
     const assoc = this.db.get<Record<string, number>>(
       `associations:${this.agentId}`,
       {},
     );
+    const associationDraw = Math.random();
     if (
-      Math.random() < this.cfg.memory.associationProbability &&
+      associationDraw < this.cfg.memory.associationProbability &&
       found.length
     ) {
       const anchor = found[0];
@@ -636,7 +648,15 @@ export class MemoryService {
         if (!this.preview) this.db.set(`associations:${this.agentId}`, assoc);
       }
     }
+    this.observation?.phase?.({
+      key: "association",
+      items: structuredClone(found),
+      reasons: { ...reasons },
+      draw: associationDraw,
+      round,
+    });
     let budget = this.cfg.context.memoryTokens;
+    const decisions: unknown[] = [];
     const out: Memory[] = [];
     for (const [i, m] of found.entries()) {
       const x = {
@@ -648,11 +668,26 @@ export class MemoryService {
             : "",
       };
       const cost = tokens(JSON.stringify(x));
+      decisions.push({
+        id: m.id,
+        position: i,
+        cost,
+        remaining_before: budget,
+        included: cost <= budget,
+        summary: x.summary,
+        details: x.details,
+      });
       if (cost <= budget) {
         out.push(x);
         budget -= cost;
       }
     }
+    this.observation?.phase?.({
+      key: "budget",
+      items: structuredClone(out),
+      decisions,
+      remaining: budget,
+    });
     await this.updateState((s) => {
       if (this.cfg.memory.activationEnabled) {
         for (const m of out)
@@ -694,8 +729,20 @@ export class MemoryService {
         "|" +
         this.cfg.models.embedding.name;
     synchronizeMemoryIndex(items, index, signature, now);
-    const state = await this.state();
-    return { items, rawItems: raw.memory, index, storedIndex, state, now };
+    const storedState = await readJson<State | null>(
+      path.join(this.root, "state.json"),
+      null,
+    );
+    const state = await this.state(storedState ?? undefined, now);
+    return {
+      items,
+      rawItems: raw.memory,
+      index,
+      storedIndex,
+      storedState,
+      state,
+      now,
+    };
   }
   async inspectMemories(entryId?: string) {
     const snap = await this.inspectionSnapshot();
@@ -764,10 +811,11 @@ export class MemoryService {
         }),
     };
   }
-  async simulateRecall(query: string, mode: "recall" | "search" = "recall") {
+  async inspectionSession() {
     const snap = await this.inspectionSnapshot();
     const calls: Array<{
       purpose: string;
+      system?: string;
       input: unknown;
       output?: unknown;
       error?: string;
@@ -776,6 +824,7 @@ export class MemoryService {
       json: async (prompt, input, signal, purpose) => {
         const call = {
           purpose: purpose ?? "query",
+          system: prompt,
           input,
         } as (typeof calls)[number];
         calls.push(call);
@@ -825,7 +874,8 @@ export class MemoryService {
       now: snap.now,
     };
     const trace: any = {
-      query: { original: query, expanded: query },
+      query: { original: "", expanded: "" },
+      phases: [],
       search: null,
       recall: null,
     };
@@ -833,7 +883,18 @@ export class MemoryService {
       query: (x) => (trace.query = x),
       search: (x) => (trace.search = x),
       recall: (x) => (trace.recall = x),
+      phase: (x) => trace.phases.push(x),
     };
+    return { snapshot: snap, memory: preview, llm, calls, trace };
+  }
+  async simulateRecall(query: string, mode: "recall" | "search" = "recall") {
+    const {
+      snapshot: snap,
+      memory: preview,
+      calls,
+      trace,
+    } = await this.inspectionSession();
+    trace.query = { original: query, expanded: query };
     const output =
       mode === "recall"
         ? await preview.recall(query)
