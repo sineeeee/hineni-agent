@@ -13,7 +13,7 @@ import re
 import tempfile
 from zoneinfo import ZoneInfo
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parent.parent
 
 
 def read_config(base=BASE):
@@ -38,15 +38,14 @@ def read_config(base=BASE):
     for key, source in cfg["sources"].items():
         if not re.fullmatch(r"[a-z0-9_-]+", key) or not isinstance(source, dict):
             raise ValueError("invalid source key or definition")
+        if source.get("kind") not in {"rss", "hn", "lobsters", "v2ex", "bluesky"}:
+            raise ValueError(f"unsupported public reader: {key}")
+        if not isinstance(source.get("url"), str) or not source["url"].startswith(("http://", "https://")):
+            raise ValueError(f"invalid public source URL: {key}")
         if type(source.get("enabled")) is not bool:
             raise ValueError("enabled must be boolean")
     if not any(s.get("enabled") for s in cfg["sources"].values()):
         raise ValueError("enable at least one source")
-    browser = cfg.get("browser", {})
-    if type(browser.get("port", 19222)) is not int or not 1024 <= browser.get("port", 19222) <= 65535:
-        raise ValueError("browser.port must be 1024–65535")
-    if not isinstance(browser.get("executable", ""), str):
-        raise ValueError("browser.executable must be a path or empty")
     return cfg
 
 

@@ -84,7 +84,7 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 
 ## 补充代码入口与约定
 
-- 可选摸鱼：templates/activities/moyu 是模板，实际文件在个人 workspace/moyu；scripts/schedule.ts 的 leisureEvent 接到同一内部事件协议。公开源直接读，社交源经 OpenCLI 连接专用 browser.py；配置/迁移见 operations.md 的摸鱼章节。
+- 可选摸鱼：templates/skills/moyu 是模板，实际文件在个人 skills/moyu；scripts/schedule.ts 的 leisureEvent 接到同一内部事件协议。仅通过Python标准库读取公开API/RSS，说明与脚本按Skill组织；配置/迁移见 operations.md 的摸鱼章节。
 
 - 状态映射：src/config/prompt-mapping.ts校验默认值，layer3/state-context.ts渲染；配置方法见configuration-guide.md的“状态与时间映射”。
 - 辅助模型：src/config/auxiliary.ts读个人规则；layer3/spark.ts生成临时想象，shared/probability.ts执行每轮抽样。概率只控制注入，不决定任务执行。

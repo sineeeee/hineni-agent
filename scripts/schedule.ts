@@ -87,10 +87,10 @@ const randomGreeting =
   "我想把自己感兴趣的一个小想法分享给对方。直接讲内容，让这个想法自己成立；讲完就好，不用附带对对方生活的安排或要求。对方没有发来新消息，也不用对方接话来完成这次分享。没有新内容就安静。";
 const runFile = promisify(execFile);
 async function leisureEvent(id: string, manual = false) {
-  const dir = path.join(store.agentRoot(id), "workspace", "moyu");
-  const dice = path.join(dir, "dice.py");
-  if (!fs.existsSync(dice)) {
-    if (manual) throw Error("Install workspace/moyu first");
+  const dir = path.join(store.agentRoot(id), "skills", "moyu");
+  const dice = path.join(dir, "scripts", "dice.py");
+  if (!fs.existsSync(dice) || !fs.existsSync(path.join(dir, "SKILL.md"))) {
+    if (manual) throw Error("Install skills/moyu first");
     return event(id, randomGreeting, "random_chat");
   }
   const { stdout } = await runFile(
@@ -116,12 +116,12 @@ async function leisureEvent(id: string, manual = false) {
   )
     throw Error("Invalid source codes");
   const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
-  const command = ["python3", path.join(dir, "fetch.py"), ...ids]
+  const command = ["python3", path.join(dir, "scripts", "fetch.py"), ...ids]
     .map(quote)
     .join(" ");
   await event(
     id,
-    `忽然想出去逛逛，看看有没有自己喜欢、也想带回来和对方聊的东西。这不是对方发来的消息。先阅读 ${path.join(dir, "SOP.md")}，再运行 ${command}。本轮来源已选好：${choice.sources.map((s: any) => s.name).join("、")}。从真实内容里挑一两件自己有感受的，自然说就好；没有值得分享的就安静。`,
+    `忽然想出去逛逛，看看有没有自己喜欢、也想带回来和对方聊的东西。这不是对方发来的消息。先阅读 ${path.join(dir, "SKILL.md")}，再运行 ${command}。本轮来源已选好：${choice.sources.map((s: any) => s.name).join("、")}。从真实内容里挑一两件自己有感受的，自然说就好；没有值得分享的就安静。`,
     "moyu_browse",
   );
 }

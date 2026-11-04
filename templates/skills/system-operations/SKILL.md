@@ -34,6 +34,12 @@ description: 管理自己的定时与随机任务、调整触发间隔和提醒�
 
 宿主启动脚本时提供 `HINENI_ROOT`、`HINENI_AGENT_ID`、`HINENI_API` 和管理连接令牌；使用现有认证逻辑，不把凭据写进事件、日志或回复。模型 Key 在个人 `.env`，公共 Bot Token 和管理口令在根 `.env`。
 
+## 摸鱼与纯聊天
+
+如果安装了skills/moyu，默认随机计时器每次机会运行该Skill的scripts/dice.py，从摸鱼、原有纯聊、安静中选一项；概率、日上限和来源在skills/moyu/config.json，保存后下次读取。读skills/moyu/SKILL.md了解抓取和分享方式。未安装或删除此Skill则恢复纯聊天，不需要另开计时器。
+
+只改间隔、活跃时段或randomChat开关时，仍修改自己的config.yaml并restart_scheduler。用户要求立即触发摸鱼时，可把下方命令的random_chat改为moyu；它仍走同一第二层事件入口。
+
 ## 手动立即触发一次招呼
 
 仅在用户要求立即触发时，在项目根目录执行（替换 `<id>`）：

@@ -5,13 +5,9 @@ import datetime as dt
 from html import unescape
 from html.parser import HTMLParser
 import json
+import os
 import random
 import sys
-import subprocess
-import shutil
-import os
-import fcntl
-import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from dice import BASE, atomic_json, locked, read_config
@@ -86,58 +82,7 @@ def parse_feed(source, body):
     return out
 
 
-# Read-only commands only. Credentials stay with OpenCLI's browser profiles.
-BROWSER_COMMANDS = {("twitter", "timeline"), ("twitter", "trending"),
-                    ("reddit", "popular"), ("xiaohongshu", "feed"), ("instagram", "explore")}
-
-
-def browser_collect(key, source, count, base=BASE, port=19222):
-    pair = (source.get("platform"), source.get("command"))
-    if pair not in BROWSER_COMMANDS:
-        raise ValueError("No supported read-only browser adapter")
-    if not shutil.which("opencli"):
-        raise ValueError("Install @jackwener/opencli and its browser extension first")
-    # One browser command at a time, including concurrent fetch processes.
-    with (base / ".browser.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        result = subprocess.run(["opencli", *pair, "--limit", str(count), "-f", "json"],
-                                env={**os.environ, "OPENCLI_CDP_ENDPOINT": f"http://127.0.0.1:{port}"},
-                                capture_output=True, text=True, timeout=min(90, max(5, int(source.get("timeoutSeconds", 60)))))
-    if result.returncode:
-        raise ValueError(f"OpenCLI exit {result.returncode}: browser unavailable, login required or source failed; run opencli doctor")
-    payload = json.loads(result.stdout)
-    if isinstance(payload, dict):
-        if payload.get("ok") is False:
-            raise ValueError("OpenCLI returned failure")
-        payload = payload.get("data", payload)
-    if isinstance(payload, dict):
-        payload = payload.get("items", payload.get("rows"))
-    if not isinstance(payload, list):
-        raise ValueError("Unexpected OpenCLI result; inspect adapter output")
-    out = []
-    for row in payload[:count]:
-        if not isinstance(row, dict):
-            continue
-        text = row.get("text") or row.get("caption") or row.get("title") or row.get("topic") or ""
-        if not text:
-            continue
-        # Preserve real signed URLs. Never invent a post URL from a title/user.
-        url = row.get("url") or row.get("permalink")
-        if url and not str(url).startswith(("http://", "https://")):
-            url = None
-        if pair == ("twitter", "trending"):
-            url = "https://x.com/search?q=" + urllib.parse.quote(str(row["topic"]))
-        item = normalize(key, text[:100], url, text, "tool_excerpt", author=row.get("author") or row.get("user"))
-        item["note"] = "Only the adapter's text excerpt was read; images/videos were not viewed."
-        if pair == ("twitter", "trending"):
-            item["note"] = "Trend label only; URL opens topic search, not an individual post."
-        out.append(item)
-    return out
-
-
-def collect(key, source, cfg, reader=request, base=BASE):
-    if source["kind"] == "opencli":
-        return browser_collect(key, source, cfg["itemsPerSource"], base, cfg.get("browser", {}).get("port", 19222))
+def collect(key, source, cfg, reader=request):
     timeout = cfg["requestTimeoutSeconds"]
     body = reader(source["url"], timeout)
     kind = source["kind"]
@@ -189,7 +134,7 @@ def run(keys, base=BASE, reader=request):
             raise ValueError(f"Disabled or unknown source: {key}")
     def fetch_one(key):
         try:
-            items = collect(key, cfg["sources"][key], cfg, reader, base)
+            items = collect(key, cfg["sources"][key], cfg, reader)
             return {"source": key, "name": cfg["sources"][key]["name"], "status": "ok" if items else "partial", "items": items}
         except Exception as exc:
             return {"source": key, "name": cfg["sources"][key]["name"], "status": "fail", "items": [], "error": str(exc)}
@@ -213,7 +158,6 @@ def run(keys, base=BASE, reader=request):
                                    "items": len(source["items"]), "error": source.get("error", "")}, ensure_ascii=False))
         # Small bounded diagnostics; editions are replaced instead of accumulating forever.
         from tempfile import NamedTemporaryFile
-        import os
         with NamedTemporaryFile("w", dir=base, prefix="fetch-log.", suffix=".tmp", delete=False) as file:
             file.write("\n".join(log[-200:]) + "\n")
             temp = file.name

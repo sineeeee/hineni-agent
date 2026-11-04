@@ -14,6 +14,7 @@ import { parseConfig, agentConfig } from "../src/config/schema.js";
 import { OpenAIModels } from "../src/shared/models.js";
 import { Scheduler } from "../src/scheduler.js";
 import { Store } from "../src/layer2/store.js";
+import { skillsList } from "../src/layer3/context.js";
 import { Journal } from "../src/layer2/journal.js";
 import { Runtime } from "../src/layer2/runtime.js";
 import { servers } from "../src/admin/server.js";
@@ -536,8 +537,8 @@ test("saved personal configuration survives fresh load and stale pre-restart edi
 
 test("manual leisure submits one normal internal event without changing automatic quota", async (t) => {
   const { root } = await setup(t);
-  const dir = path.join(root, "agents/main/workspace/moyu");
-  await fs.cp(path.resolve("templates/activities/moyu"), dir, {
+  const dir = path.join(root, "agents/main/skills/moyu");
+  await fs.cp(path.resolve("templates/skills/moyu"), dir, {
     recursive: true,
     filter: (p) => !p.includes("__pycache__"),
   });
@@ -577,7 +578,13 @@ test("manual leisure submits one normal internal event without changing automati
   assert.equal(received[0].body.agent_id, "main");
   assert.equal(received[0].body.type, "internal_event");
   assert.equal(received[0].body.data.kind, "moyu_browse");
-  assert.match(received[0].body.text, /SOP\.md/);
+  assert.match(received[0].body.text, /SKILL\.md/);
+  const listed = await skillsList([path.join(root, "agents/main/skills")]);
+  assert.ok(
+    listed.some(
+      (s) => s.name === "moyu" && s.file === path.join(dir, "SKILL.md"),
+    ),
+  );
   assert.match(received[0].body.text, /fetch\.py/);
   const state = JSON.parse(
     await fs.readFile(path.join(dir, "state.json"), "utf8"),

@@ -59,10 +59,10 @@ OpenAI曾验证向量、查询JSON、记忆召回、Pi文件工具循环、状�
 隔离浏览器实测25步导航、心情原值到分档文字、输入/原文/累积视图和最终角色顺序；截图使用虚构资料。正式服务完整重启后，真实context试算返回25步，角色为system→历史占位→system→user，带出12条记忆，query、spark、embedding成功；rerank仍在当前等待限制下回退。正式memory.json前后摘要一致，没有调用第四层或发送Telegram。个人配置、人格和辅助规则未修改。
 
 
-## 摸鱼与平台读取
+## 摸鱼Skill与公开读取
 
-摸鱼测试覆盖自动日额度、跨天重置、手动抽签不占额度、相邻来源优先避重、preview只读、RSS读取范围、浏览器命令白名单和未返回链接时不编造。独立HTTP接收器验证手动触发只发一条标准internal_event，不向真实Telegram发测试消息。
+摸鱼测试覆盖自动日额度、跨天重置、手动抽签不占额度、相邻来源优先避重、preview只读、RSS读取范围、公开API返回内容与失败结果。独立HTTP接收器验证手动触发只发一条标准internal_event，指向实际SKILL.md和脚本，不向真实Telegram发测试消息；同时验证Skill能被第三层正常发现。
 
-本机实际读取到非空候选：HN、Lobsters、V2EX、Product Hunt、Bluesky、Tildes、MetaFilter、Colossal、Neatorama。Reddit匿名RSS返回403，不启用；X/Instagram/小红书的OpenCLI客户端和只读命令已核实，专用浏览器与账号尚未登录，账号读取仍待用户登录后验证；CDP直连支持已从安装代码核实，浏览器启动另以不登录的临时资料验证。实际通过OpenCLI适配器使用的CDPBridge在空白页执行并取得结果；其通用browser open命令曾超时，未作为本功能可用性的依据。Threads暂无共用适配器，保留关闭项。联网可用不代表每篇正文或图片已读，也不作为对话质量验收。
+此前已实际读到非空候选的九个公开来源继续保留：HN、Lobsters、V2EX、Product Hunt、Bluesky、Tildes、MetaFilter、Colossal、Neatorama。需要账号的来源、占位项、平台适配代码和浏览器启动器已移除。OpenCLI全局包已卸载；~/.opencli因含spotify.env而保留，未删除可能属于其他用途的配置。联网可用不代表每篇正文或图片已读，也不作为对话质量验收。
 
-本次完整类型检查、99项自动测试和构建通过；main已安装独立摸鱼文件并重启服务及个人定时进程。未向真实Telegram发送摸鱼测试消息，未修改模型、人格、记忆或其他定时任务。
+个人main的摸鱼说明、配置和脚本已从workspace/moyu迁到skills/moyu，定时入口和网页文件说明同步；原有概率、间隔及其他个人配置保留。修改后完整类型检查、99项测试、文档生成和构建通过，应用已重启并从真实接口确认moyu出现在Skill列表、config.json可在文件编辑器修改。新路径实际试读V2EX与Colossal均返回4条候选。未调用付费模型或向真实Telegram发送摸鱼测试消息。

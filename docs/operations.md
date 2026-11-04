@@ -52,16 +52,16 @@ Git 跟踪源码、锁文件、模板、配置样例和文档。实际 config.ya
 
 ## 摸鱼与随机聊天共用计时器
 
-可选模板在templates/activities/moyu，复制到agents/<id>/workspace/moyu后，该agent的schedule.ts会使用它；没有此目录仍用原来的纯聊天逻辑。已有个人schedule.ts需同步模板中的leisureEvent接线，初始化不会覆盖旧脚本。不添加Skill，不另起调度服务，也不改四层协议：定时到点→dice.py抽签→moyu_browse或random_chat内部事件→/v1/events→第二层→完整上下文和主agent执行。quiet不提交事件。抓取由主agent通过Bash运行fetch.py，工具结果正常进入第二层。
+摸鱼是正式Skill：模板在templates/skills/moyu，个人副本在agents/<id>/skills/moyu。SKILL.md说明如何使用；config.json保存来源与概率；scripts/dice.py抽签，scripts/fetch.py读取公开API/RSS。源仅保留HN、Lobsters、V2EX、Product Hunt、Bluesky、Tildes、MetaFilter、Colossal、Neatorama；只需要Python3.10+标准库，不需要账号、浏览器或其他常驻服务。
 
-本次main设为当地8–22点，每100–200分钟一次机会；最多5次机会/天，相对权重摸鱼65、纯聊20、安静15。真正发送次数可更少。每次机会才投骰子，每次摸鱼抽2–3站、每站最多4条候选，最终建议只分享1–2件。原有纯聊天文案保留，记忆整理、做梦、一次性提醒互不改变。
+定时到点→dice.py选moyu/chat/quiet→摸鱼或纯聊事件提交同一个/v1/events→第二层→第三层编排→主agent执行。quiet不提交事件。摸鱼事件指定SKILL.md和本轮抓取命令，主agent读Skill、抓取、选择分享或沉默；工具结果照常进第二层。未安装Skill或已在网页删除它时，原来的随机计时器只做纯聊天。新增agent按常规初始化复制Skill；已有个人schedule.ts不被覆盖，需确认包含leisureEvent接线。
 
-时间窗口/间隔/总开关：个人config.yaml的scheduler，保存后重启该agent的定时脚本。来源、配额、权重：workspace/moyu/config.json，保存后下一次机会生效，文件编辑器可直接修改。SOP.md解释行为及全部参数；dice.py、fetch.py、connect.py是可执行脚本。state.json只记当天额度和最近来源，跨天重置、重启不清当天额度；不保存下一次时间。抓取日志最近200行，last-edition.json每次替换，均不代表已发给用户。实际去重参考第二层已发送聊天，不预登记已分享。
+main当前是当地8–22点，每100–200分钟一次机会；每天最多5次机会，相对权重摸鱼65、纯聊20、安静15。每次才投骰子；一次摸鱼抽2–3站，每站最多4条候选，最终自然分享一两件即可，也可沉默。原有纯聊天文案、每日记忆、梦境、一次性提醒保持原流程。
 
-手动触发一次完整摸鱼：项目目录执行`node --import tsx agents/main/schedule.ts --once moyu --agent main`，会向真实agent提交事件；不占自动机会额度。仅试读来源、不发消息：`python3 agents/main/workspace/moyu/connect.py probe d`。`connect.py status`看状态，`enable a`验证并启用，`disable a`停用指定来源；骰子preview/show只看不写，next只抽站不发消息。关闭整个随机聊天与摸鱼用scheduler.randomChat=false并重启定时脚本。
+时间窗口/间隔/总开关在个人config.yaml的scheduler，保存后重启个人定时脚本。其他摸鱼配置都在skills/moyu/config.json，网页Skill页或文件页可打开，保存后下一次机会读取。字段含义见SKILL.md和网页文件说明。来源的enabled控制开关，至少留一个；RSS新增只需填name、enabled、kind=rss、url；其他API要有对应解析实现。
 
-公开API/RSS直接读。需登录的X、Instagram、小红书、Reddit共用OpenCLI，安装`npm install -g @jackwener/opencli@2.0.2`。运行`python3 agents/main/workspace/moyu/browser.py`打开专用浏览器窗口，手动登录网站；不需要日常Chrome或扩展。`browser.py --check`只检查路径；`browser.py --headless`用于服务器后台读取，进程由自己的终端或systemd等进程管理器保持。浏览器不是本应用默认启动的进程；未接账号时无需运行。Ctrl+C关闭，不新增另一套计时器。
+运行小文件也保留在自己的Skill目录：state.json是当天机会数和最近来源；跨天重置，重启保留当天配额，不记下一次时间。last-edition.json每次替换；fetch-log.jsonl只保留最近200行。抓取过不代表发过，分享去重看实际聊天。删除整个Skill会一并删除其配置和这些小文件。
 
-浏览器资料在workspace/moyu/browser/.profile，端口在摸鱼config.json的browser.port，默认19222；executable为空自动找本系统浏览器，也可填写自备程序路径。fetch.py明确连该端口，不依赖OpenCLI全局默认profile。多agent应各用自己的目录和不同端口。资料目录随agent备份，但跨macOS/Linux的Cookie可能受系统加密或平台校验影响需要重新登录；浏览器可执行程序须安装目标系统版本，不能复制macOS程序到Linux。调试端口只用于本机，不直接公开。账号未实测读到内容前来源保持关闭；Threads仍是待选接入。
+手动触发一次完整摸鱼：项目根目录执行`node --import tsx agents/main/schedule.ts --once moyu --agent main`。会向真实agent提交事件，不占自动配额，不另启计时器。只试读、不发消息：`python3 agents/main/skills/moyu/scripts/fetch.py d h`。`dice.py preview`和`show`只读；`next`只抽站。关闭某个来源改Skill的sources.enabled；关闭全部随机摸鱼与纯聊设scheduler.randomChat=false并重启定时脚本。
 
-当前DeepSeek Flash的Responses原生web_search被供应商忽略，runtime.webEnabled=true只证明工具被注册，不证明真有联网搜索。Pi的find/grep是文件工具；公开抓取与OpenCLI不依赖模型自带搜索。供应商文档：https://api-docs.deepseek.com/guides/responses_api.md 。OpenCLI安装与平台清单：https://github.com/jackwener/OpenCLI 。
+迁移时带上项目和个人文件，按常规`npm ci`、`npm run build`并启动Hineni；系统有Python3.10+即可运行摸鱼脚本，不需要额外pip包、账号登录或浏览器初始化。网络需要能访问所选公开源；某个源失败会单独记录，不冒充已读正文。当前DeepSeek Flash原生web_search不作为读取依赖；Pi的find/grep是文件工具。

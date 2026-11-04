@@ -1,0 +1,72 @@
+{
+  "dailyOpportunities": 5,
+  "weights": {
+    "moyu": 65,
+    "chat": 20,
+    "quiet": 15
+  },
+  "sourceCountMin": 2,
+  "sourceCountMax": 3,
+  "avoidRecentRolls": 1,
+  "itemsPerSource": 4,
+  "requestTimeoutSeconds": 10,
+  "sources": {
+    "d": {
+      "name": "Hacker News",
+      "enabled": true,
+      "kind": "hn",
+      "url": "https://hacker-news.firebaseio.com/v0/topstories.json"
+    },
+    "e": {
+      "name": "Lobsters",
+      "enabled": true,
+      "kind": "lobsters",
+      "url": "https://lobste.rs/hottest.json"
+    },
+    "h": {
+      "name": "V2EX",
+      "enabled": true,
+      "kind": "v2ex",
+      "url": "https://www.v2ex.com/api/topics/hot.json"
+    },
+    "i": {
+      "name": "Product Hunt",
+      "enabled": true,
+      "note": "公开Atom订阅",
+      "kind": "rss",
+      "url": "https://www.producthunt.com/feed"
+    },
+    "m": {
+      "name": "Bluesky 热门",
+      "enabled": true,
+      "kind": "bluesky",
+      "url": "https://public.api.bsky.app/xrpc/app.bsky.feed.getFeed?feed=at%3A%2F%2Fdid%3Aplc%3Az72i7hdynmk6r22z27h6tvur%2Fapp.bsky.feed.generator%2Fwhats-hot&limit=20"
+    },
+    "n": {
+      "name": "Tildes",
+      "enabled": true,
+      "note": "公开Atom订阅",
+      "kind": "rss",
+      "url": "https://tildes.net/topics.atom"
+    },
+    "o": {
+      "name": "MetaFilter",
+      "enabled": true,
+      "note": "公开RSS订阅",
+      "kind": "rss",
+      "url": "https://feeds.feedburner.com/Metafilter"
+    },
+    "p": {
+      "name": "Colossal",
+      "enabled": true,
+      "kind": "rss",
+      "url": "https://www.thisiscolossal.com/feed/"
+    },
+    "q": {
+      "name": "Neatorama",
+      "enabled": true,
+      "kind": "rss",
+      "url": "https://www.neatorama.com/feed/"
+    }
+  }
+}
