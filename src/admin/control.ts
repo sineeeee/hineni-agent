@@ -1,3 +1,4 @@
+import { memoryRoutes } from "./memory.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
@@ -32,6 +33,7 @@ export async function controls(
 ) {
   const files = new AdminFiles(config);
   cleanupRoutes(app, config, runtime);
+  memoryRoutes(app, runtime);
   const historyViews = new Map<
     string,
     { key: string; view: ReturnType<History["inspect"]> }

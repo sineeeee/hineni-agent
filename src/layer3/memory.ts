@@ -1,3 +1,4 @@
+import { memoryFactors, synchronizeMemoryIndex } from "./memory-ranking.js";
 import { auxiliaryPrompt } from "../config/auxiliary.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -57,6 +58,20 @@ export class MemoryService {
     private cfg: Config,
     private llm: Intelligence,
   ) {}
+  private preview?: {
+    items: Memory[];
+    index: Record<string, any>;
+    state: State;
+    now: number;
+  };
+  private observation?: {
+    query?: (value: any) => void;
+    search?: (value: any) => void;
+    recall?: (value: any) => void;
+  };
+  private now() {
+    return this.preview?.now ?? Date.now();
+  }
   private validItems: Memory[] = [];
   private itemsValid = false;
   private lifecycle = new AbortController();
@@ -65,6 +80,7 @@ export class MemoryService {
     return this.indexingTask;
   }
   async items() {
+    if (this.preview) return structuredClone(this.preview.items);
     try {
       const file = path.join(this.root, "memory.json");
       const raw = await readJson<any>(file, { memory: [] });
@@ -98,21 +114,23 @@ export class MemoryService {
     }
   }
   async state(): Promise<State> {
-    const now = Date.now();
-    const s = await readJson<State>(path.join(this.root, "state.json"), {
-      updated_at: new Date(now).toISOString(),
-      mood: this.cfg.state.baseline,
-      emotions: {},
-      drives: Object.fromEntries(
-        Object.entries(this.cfg.drives)
-          .filter(([, d]) => d.enabled)
-          .map(([k, d]) => [k, d.baseline]),
-      ),
-      cause: "",
-      thoughts: [],
-      focus: [],
-      activation: {},
-    });
+    const now = this.now();
+    const s = this.preview
+      ? structuredClone(this.preview.state)
+      : await readJson<State>(path.join(this.root, "state.json"), {
+          updated_at: new Date(now).toISOString(),
+          mood: this.cfg.state.baseline,
+          emotions: {},
+          drives: Object.fromEntries(
+            Object.entries(this.cfg.drives)
+              .filter(([, d]) => d.enabled)
+              .map(([k, d]) => [k, d.baseline]),
+          ),
+          cause: "",
+          thoughts: [],
+          focus: [],
+          activation: {},
+        });
     const hours = Math.max(0, (now - Date.parse(s.updated_at)) / 3600000);
     s.mood =
       this.cfg.state.baseline +
@@ -161,7 +179,7 @@ export class MemoryService {
     const job = this.stateChain.then(async () => {
       const s = await this.state();
       fn(s);
-      await jsonWrite(path.join(this.root, "state.json"), s);
+      if (!this.preview) await jsonWrite(path.join(this.root, "state.json"), s);
       return s;
     });
     this.stateChain = job.catch(() => {});
@@ -237,6 +255,7 @@ export class MemoryService {
     return job;
   }
   async sync(enrich = false) {
+    if (this.preview) return this.items();
     const items = await this.items();
     if (!this.itemsValid) {
       if (enrich) throw Error("memory.json 无效，请先修正文件。");
@@ -245,27 +264,7 @@ export class MemoryService {
     const signature =
       this.cfg.models.embedding.baseUrl + "|" + this.cfg.models.embedding.name;
     await this.mutateIndex(async (index) => {
-      const valid = new Set(items.map((m) => m.id));
-      for (const key of Object.keys(index))
-        if (!valid.has(key)) delete index[key];
-      for (const m of items) {
-        const hash = createHash("sha256")
-            .update(JSON.stringify(m))
-            .digest("hex"),
-          old = index[m.id];
-        if (!old || old.hash !== hash || old.embeddingModel !== signature)
-          index[m.id] = {
-            hash,
-            text:
-              m.summary + "\n" + m.details + "\n" + JSON.stringify(m.people),
-            description: "",
-            vectors: [],
-            strength: old?.strength ?? 1,
-            strengthAt: old?.strengthAt ?? new Date().toISOString(),
-            familiarity: old?.familiarity ?? 0,
-            embeddingModel: signature,
-          };
-      }
+      synchronizeMemoryIndex(items, index, signature, this.now());
     });
     if (!enrich || this.enriching) return items;
     this.enriching = true;
@@ -360,6 +359,7 @@ export class MemoryService {
     return items;
   }
   async index() {
+    if (this.preview) return structuredClone(this.preview.index);
     const cached = this.db.get<Record<string, any> | null>(
       `index:${this.agentId}`,
       null,
@@ -415,51 +415,28 @@ export class MemoryService {
               ...row.vectors.map((v: number[]) => cosine(vectors[0], v)),
             )
           : 0;
-        const I = (m.importance - 1) / 4;
-        const days = Math.max(
-          0,
-          (Date.now() - Date.parse(row.strengthAt)) / 86400000,
+        const factors = memoryFactors(
+          m,
+          row,
+          state,
+          this.cfg.memory,
+          this.now(),
+          explicit,
         );
-        const A = explicit
-          ? 1
-          : row.strength *
-            2 **
-              (-days /
-                (this.cfg.memory.baseHalfLifeDays *
-                  (1 + this.cfg.memory.importanceMultiplier * I)));
-        const B = state.activation[m.id]
-          ? 2 **
-            (-(Date.now() - state.activation[m.id]) /
-              60000 /
-              this.cfg.memory.activationHalfLifeMinutes)
-          : 0;
-        const emotionText = JSON.stringify(m.emotion ?? "");
-        const daysOld = Math.max(
-          0,
-          (Date.now() - Date.parse(m.occurred_at)) / 86400000,
-        );
-        const E =
-          Math.max(
-            0,
-            ...Object.entries(state.emotions)
-              .filter(([k]) => emotionText.includes(k))
-              .map(([, v]) => v / 100),
-          ) *
-          2 ** (-daysOld / this.cfg.memory.emotionHalfLifeDays);
         return {
           m,
           lex,
           sem,
-          A: clamp(A, 0, 1),
-          I,
-          B,
-          E: Number.isFinite(E) ? E : 0,
-          F: 1 - Math.exp(-row.familiarity / 5),
+          factors,
+          A: factors.strength,
+          I: factors.importance,
+          B: factors.activation,
+          E: factors.emotion,
+          F: factors.familiarity,
         };
       });
     const lex = [...ranked].sort((a, b) => b.lex - a.lex),
       sem = [...ranked].sort((a, b) => b.sem - a.sem);
-    const weights = this.cfg.memory.rankWeights;
     let results = ranked
       .filter((x) => x.lex > 0 || x.sem > this.cfg.memory.vectorThreshold)
       .map((x) => ({
@@ -467,15 +444,11 @@ export class MemoryService {
         score:
           (1 / (this.cfg.memory.rrfK + lex.indexOf(x) + 1) +
             1 / (this.cfg.memory.rrfK + sem.indexOf(x) + 1)) *
-          (weights.base +
-            weights.strength * x.A +
-            weights.importance * x.I +
-            weights.activation * x.B +
-            weights.familiarity * x.F +
-            weights.emotion * x.E),
+          x.factors.multiplier,
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, this.cfg.memory.candidates);
+    const initialScores = new Map(results.map((x) => [x.m.id, x.score]));
     if (this.cfg.memory.rerank && results.length > 1 && !explicit)
       try {
         const out = await this.llm.json(
@@ -508,6 +481,7 @@ export class MemoryService {
           error: errorText(e),
         });
       }
+    const rerankedScores = new Map(results.map((x) => [x.m.id, x.score]));
     const selected: typeof results = [];
     while (results.length && selected.length < limit) {
       results.sort((a, b) => b.score - a.score);
@@ -522,18 +496,43 @@ export class MemoryService {
         x.score *= 1 - this.cfg.memory.diversityPenalty * overlap;
       }
     }
-    this.db.log("debug", "recall", "ranked memories", {
-      agent: this.agentId,
-      selected: selected.map((x) => ({
+    this.observation?.search?.({
+      query,
+      explicit,
+      entries: ranked.map((x) => ({
         id: x.m.id,
-        score: x.score,
-        semantic: x.sem,
         lexical: x.lex,
-        strength: x.A,
-        activation: x.B,
-        emotion: x.E,
+        semantic: x.sem,
+        factors: x.factors,
+        eligible: x.lex > 0 || x.sem > this.cfg.memory.vectorThreshold,
+        candidate: initialScores.has(x.m.id),
+        initial_score: initialScores.get(x.m.id) ?? null,
+        reranked_score: rerankedScores.get(x.m.id) ?? null,
+        selected_score: selected.find((y) => y.m.id === x.m.id)?.score ?? null,
+        search_rank:
+          selected.findIndex((y) => y.m.id === x.m.id) < 0
+            ? null
+            : selected.findIndex((y) => y.m.id === x.m.id) + 1,
       })),
+      selected_ids: selected.map((x) => x.m.id),
     });
+    this.db.log(
+      "debug",
+      this.preview ? "memory-preview" : "recall",
+      "ranked memories",
+      {
+        agent: this.agentId,
+        selected: selected.map((x) => ({
+          id: x.m.id,
+          score: x.score,
+          semantic: x.sem,
+          lexical: x.lex,
+          strength: x.A,
+          activation: x.B,
+          emotion: x.E,
+        })),
+      },
+    );
     return selected.map((x) => x.m);
   }
   async recall(query: string, signal?: AbortSignal) {
@@ -572,9 +571,11 @@ export class MemoryService {
           error: errorText(e),
         });
       }
+    this.observation?.query?.({ original: query, expanded: q });
     if (!q.trim()) return [];
     const found = await this.search(q, false, this.cfg.memory.maxItems, signal);
     const all = await this.items();
+    const reasons = Object.fromEntries(found.map((m) => [m.id, "relevant"]));
     if (found.length) {
       const anchor = found[0];
       const neighbors = all
@@ -598,9 +599,10 @@ export class MemoryService {
         .slice(0, this.cfg.memory.temporalNeighbors);
       found.splice(Math.max(1, this.cfg.memory.maxItems - neighbors.length));
       found.push(...neighbors);
+      for (const m of neighbors) reasons[m.id] = "temporal";
     }
     const round = this.db.get(`recallRound:${this.agentId}`, 0) + 1;
-    this.db.set(`recallRound:${this.agentId}`, round);
+    if (!this.preview) this.db.set(`recallRound:${this.agentId}`, round);
     const assoc = this.db.get<Record<string, number>>(
       `associations:${this.agentId}`,
       {},
@@ -630,7 +632,8 @@ export class MemoryService {
           details: "",
         });
         assoc[m.id] = round;
-        this.db.set(`associations:${this.agentId}`, assoc);
+        reasons[m.id] = "association";
+        if (!this.preview) this.db.set(`associations:${this.agentId}`, assoc);
       }
     }
     let budget = this.cfg.context.memoryTokens;
@@ -660,7 +663,194 @@ export class MemoryService {
         s.activation = Object.fromEntries(keep);
       }
     });
+    this.observation?.recall?.({
+      expanded_ids: found.map((m) => ({ id: m.id, reason: reasons[m.id] })),
+      packed: out,
+    });
     return out;
+  }
+  private async inspectionSnapshot() {
+    const raw = await readJson<any>(path.join(this.root, "memory.json"), {
+      memory: [],
+    });
+    const parsed = z
+      .object({ memory: z.array(Item) })
+      .passthrough()
+      .parse(raw);
+    const items = parsed.memory.map((m) => {
+      if (!m.id)
+        throw Error(
+          "记忆缺少id，请先让正常索引同步补齐，再检查；预览不会改文件。",
+        );
+      return m as Memory;
+    });
+    if (new Set(items.map((m) => m.id)).size !== items.length)
+      throw Error("duplicate memory id");
+    const storedIndex = structuredClone(await this.index());
+    const index = structuredClone(storedIndex);
+    const now = Date.now(),
+      signature =
+        this.cfg.models.embedding.baseUrl +
+        "|" +
+        this.cfg.models.embedding.name;
+    synchronizeMemoryIndex(items, index, signature, now);
+    const state = await this.state();
+    return { items, rawItems: raw.memory, index, storedIndex, state, now };
+  }
+  async inspectMemories(entryId?: string) {
+    const snap = await this.inspectionSnapshot();
+    if (entryId && !snap.items.some((m) => m.id === entryId))
+      throw Error("Unknown memory for this agent");
+    const databaseIndex = this.db.get<Record<string, any> | null>(
+      `index:${this.agentId}`,
+      null,
+    );
+    return {
+      agent_id: this.agentId,
+      as_of: new Date(snap.now).toISOString(),
+      paths: {
+        memory: path.join(this.root, "memory.json"),
+        index: path.join(this.root, ".runtime/search-index.json"),
+        state: path.join(this.root, "state.json"),
+        database:
+          (this.db.db.prepare("PRAGMA database_list").all() as any[]).find(
+            (x) => x.name === "main",
+          )?.file ?? "runtime.sqlite",
+        database_key: `index:${this.agentId}`,
+      },
+      index_source: databaseIndex === null ? "file_fallback" : "database",
+      policy: {
+        memory: this.cfg.memory,
+        memoryTokens: this.cfg.context.memoryTokens,
+        emotionLabels: this.cfg.state.emotionLabels,
+      },
+      current_emotions: snap.state.emotions,
+      rows: snap.items
+        .filter((m) => !entryId || m.id === entryId)
+        .map((m) => {
+          const stored = snap.storedIndex[m.id];
+          const { vectors, ...fields } = stored ?? {};
+          return {
+            id: m.id,
+            memory: snap.rawItems.find((x: any) => x.id === m.id),
+            stored_index: stored
+              ? {
+                  ...fields,
+                  ...(entryId ? { vectors } : {}),
+                  vector_count: vectors?.length ?? 0,
+                  vector_dimensions: [
+                    ...new Set((vectors ?? []).map((v: number[]) => v.length)),
+                  ],
+                }
+              : null,
+            index_current:
+              !!stored &&
+              stored.hash === snap.index[m.id].hash &&
+              stored.embeddingModel === snap.index[m.id].embeddingModel,
+            factors: memoryFactors(
+              m,
+              snap.index[m.id],
+              snap.state,
+              this.cfg.memory,
+              snap.now,
+            ),
+            configured_emotion_matches: this.cfg.state.emotionLabels.filter(
+              (name) => JSON.stringify(m.emotion ?? "").includes(name),
+            ),
+            activation_at: snap.state.activation[m.id]
+              ? new Date(snap.state.activation[m.id]).toISOString()
+              : null,
+          };
+        }),
+    };
+  }
+  async simulateRecall(query: string, mode: "recall" | "search" = "recall") {
+    const snap = await this.inspectionSnapshot();
+    const calls: Array<{
+      purpose: string;
+      input: unknown;
+      output?: unknown;
+      error?: string;
+    }> = [];
+    const llm: Intelligence = {
+      json: async (prompt, input, signal, purpose) => {
+        const call = {
+          purpose: purpose ?? "query",
+          input,
+        } as (typeof calls)[number];
+        calls.push(call);
+        try {
+          return (call.output = await this.llm.json(
+            prompt,
+            input,
+            signal,
+            purpose,
+          ));
+        } catch (e) {
+          call.error = errorText(e);
+          throw e;
+        }
+      },
+      embed: async (texts, signal) => {
+        const call = {
+          purpose: "embedding",
+          input: texts,
+        } as (typeof calls)[number];
+        calls.push(call);
+        try {
+          const output = await this.llm.embed(texts, signal);
+          call.output = {
+            count: output.length,
+            dimensions: output.map((v) => v.length),
+          };
+          return output;
+        } catch (e) {
+          call.error = errorText(e);
+          throw e;
+        }
+      },
+      summarize: (...args) => this.llm.summarize(...args),
+    };
+    const preview = new MemoryService(
+      this.root,
+      this.agentId,
+      this.db,
+      this.cfg,
+      llm,
+    );
+    preview.preview = {
+      items: snap.items,
+      index: snap.index,
+      state: snap.state,
+      now: snap.now,
+    };
+    const trace: any = {
+      query: { original: query, expanded: query },
+      search: null,
+      recall: null,
+    };
+    preview.observation = {
+      query: (x) => (trace.query = x),
+      search: (x) => (trace.search = x),
+      recall: (x) => (trace.recall = x),
+    };
+    const output =
+      mode === "recall"
+        ? await preview.recall(query)
+        : await preview.search(query, true, this.cfg.memory.maxItems);
+    return {
+      agent_id: this.agentId,
+      mode,
+      as_of: new Date(snap.now).toISOString(),
+      policy: {
+        memory: this.cfg.memory,
+        memoryTokens: this.cfg.context.memoryTokens,
+      },
+      calls,
+      ...trace,
+      output,
+      note: "使用当前运行配置和隔离快照。可能调用付费辅助模型；不会写记忆、索引、激活、强化、召回计数或真实查询缓存，不会触发聊天。自动模式的联想抽签独立于正式对话。",
+    };
   }
   async afterRun(runId: string, input: unknown, candidates: Memory[]) {
     if (!this.cfg.state.enabled) return;

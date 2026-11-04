@@ -214,6 +214,14 @@ memory_search 和管理 API 的 memory/search 走 explicit=true：仍用词法/�
 
 memory_search 按页返回 id/time/summary，offset 是条目偏移。memory_read 按 token 容量截取条目 JSON 字符串，offset 是字符偏移，用 hash version 检查条目是否变化。调用过的记忆 ID 加入本轮候选，之后才由 afterRun 判断是否真正重温。
 
+### 记忆检查与隔离试算
+
+src/admin/memory.ts提供检查与试算接口，src/admin/memory-client.ts提供独立tab。MemoryService.inspectMemories读取真实条目与数据库优先的索引；列表省略向量矩阵，按id读取详情才返回矩阵。stored_index是实际存储，index_current表示其内容hash与向量模型是否仍有效；factors是当前运行参数和时间下计算值，不写回。
+
+memory-ranking.ts集中实现强度、重要性、激活、熟悉、情绪联系及各项贡献，正式检索和检查共用；synchronizeMemoryIndex也共用，试算只在副本里处理失效索引。simulateRecall新建私有MemoryService快照，复用正式recall/search、重排、邻居、联想和预算逻辑；捕获query/embedding/rerank输入输出和检索观察点，不另写一套排名器。预览实例禁止持久化状态、索引和轮数/冷却，不共享真实queryCache。只允许每agent一份同时进行的HTTP试算。
+
+记忆emotion是自由内容；当前情绪由state.emotionLabels约束。现算法用当前情绪名称是否包含在记忆emotion序列化文本中匹配，不做同义词归一或向量情绪匹配。记忆emotion对象中的valence/intensity也不直接参与此项分数；该项强度来自当前state.emotions。匹配项及贡献可在检查页查看，未因此修改现有标签或参数。
+
 ## 第三层状态与回合后更新
 
 state.json 只保存当前快照：updated_at、可选 assessed_at（回合评分时间）、mood、emotions、drives、cause、thoughts、focus、focus_updated_at、activation、可选 conversation_context。没有独立的状态历史文件，但原始对话、工具和 run 记录仍在。

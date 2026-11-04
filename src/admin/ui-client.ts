@@ -1,3 +1,4 @@
+import { memoryClient } from "./memory-client.js";
 import { jsonViewerClient } from "./json-viewer.js";
 import { fieldHelp } from "../config/help.js";
 import { guideKey } from "../config/guide.js";
@@ -11,11 +12,12 @@ export const client =
   buildStylePrompt.toString() +
   ";\n" +
   jsonViewerClient +
+  memoryClient +
   String.raw`function replaceContent(node,...children){node.replaceChildren(...children.filter(x=>x!==null&&x!==undefined));}
 const $=id=>document.getElementById(id);
 const clone=x=>structuredClone(x);
-const titles={telegram:['Telegram 接入','Bot 凭据、Chat ID、接收路由与默认回复位置'],live:['工作台','聊天、附件与最近发生的事'],runs:['执行与工具','每轮推理、工具输入输出和投递结果'],context:['上下文','检查主模型调用前的内容与 Pi 内部快照'],settings:['配置','按功能调整参数，保存后重启生效'],models:['模型与密钥','获取模型列表，管理调用地址和凭据'],agents:['Agents','独立人格、记忆、工作目录与接入位置'],files:['文件与文档','直接查看和编辑真实文件'],skills:['Skills','安装、编辑和移除当前 agent 的技能'],logs:['程序日志','诊断信息；工具明细请看「执行与工具」']};
-const icons={telegram:'↗',live:'◉',runs:'☷',context:'▤',settings:'⚙',models:'◇',agents:'♙',files:'▱',skills:'⊞',logs:'≡'};
+const titles={telegram:['Telegram 接入','Bot 凭据、Chat ID、接收路由与默认回复位置'],live:['工作台','聊天、附件与最近发生的事'],runs:['执行与工具','每轮推理、工具输入输出和投递结果'],memory:['记忆','检查原文、索引、衰减与召回试算'],context:['上下文','检查主模型调用前的内容与 Pi 内部快照'],settings:['配置','按功能调整参数，保存后重启生效'],models:['模型与密钥','获取模型列表，管理调用地址和凭据'],agents:['Agents','独立人格、记忆、工作目录与接入位置'],files:['文件与文档','直接查看和编辑真实文件'],skills:['Skills','安装、编辑和移除当前 agent 的技能'],logs:['程序日志','诊断信息；工具明细请看「执行与工具」']};
+const icons={telegram:'↗',live:'◉',runs:'☷',memory:'◌',context:'▤',settings:'⚙',models:'◇',agents:'♙',files:'▱',skills:'⊞',logs:'≡'};
 const labels={server:'服务与端口',models:'模型',history:'历史与压缩',context:'上下文编排与预算',memory:'记忆与召回',state:'心情与状态',style:'表达风格',runtime:'工具与执行',delivery:'发送与分句',scheduler:'主动行为与定时',prompts:'提示词覆盖',drives:'驱动力',channels:'消息渠道',agents:'Agent 设置',mcp:'MCP 服务',name:'名称',id:'编号',enabled:'启用',protocol:'请求协议',baseUrl:'接口地址',apiKeyEnv:'密钥变量名',contextWindow:'上下文容量',maxOutput:'输出上限',reasoning:'推理强度',compat:'兼容选项',defaultTarget:'默认回复位置',targets:'发送目标别名',routes:'额外接收位置',channel:'渠道',conversation:'聊天 ID',thread:'话题 ID',kind:'聊天类型',skills:'额外 Skill 目录',overrides:'独立配置覆盖',command:'启动命令',args:'启动参数',url:'服务地址',env:'子进程环境',headersEnv:'请求头变量名',type:'类型',tokenEnv:'凭据变量名',allowedChats:'允许的聊天 ID',maxFileBytes:'附件大小上限',secretEnv:'请求密钥变量名',baseline:'常态值',halfLifeHours:'回稳半衰期（小时）',sensitivity:'敏感度',min:'最小值',max:'最大值',main:'主模型',fast:'辅助模型',embedding:'向量模型',query:'查询模型',maintenance:'索引描述模型',emotion:'心情模型',rerank:'重排模型',spark:'本轮灵感模型'};
 let token=sessionStorage.getItem('hineni-token')||'',cfg,savedCfg,schema,revision,status,view='live',agentId='',epoch=0,dirty=false,selectedRun=null,currentFile=null,fileVersion=null,fileDirty=false,loadedFile='',runList=[],liveItems=[],contextRequest=null,contextFollow=true;
 const catalogs={};let helpData={sections:{},fields:{},defaults:{}},fileCatalog=[],fileCategory='agent',showAdvancedFiles=false,editorMode='read',telegramChannel='';
@@ -41,7 +43,7 @@ async function refreshConfig(){const r=await api('/v1/config');cfg=r.config;save
 async function connect(){token=$('token').value||token;await refreshConfig();sessionStorage.setItem('hineni-token',token);if($('login').open)$('login').close();$('connection').textContent='已连接本地服务';await refreshStatus();await show(view);}
 async function refreshStatus(){status=await api('/v1/status');$('restartBadge').hidden=!status.restart_required;return status;}
 function canLeave(){if(fileDirty&&!confirm('文件有未保存修改。离开并放弃这些修改？'))return false;if(fileDirty)onceDrafts.clear();fileDirty=false;return true;}
-async function show(next){if(next!==view&&!canLeave())return;view=next;$('notice').hidden=true;const generation=++epoch;location.hash=next;$('pageTitle').textContent=titles[next][0];$('pageDescription').textContent=titles[next][1];for(const b of $('nav').children)b.classList.toggle('active',b.dataset.view===next);$('content').replaceChildren(el('div',{class:'spinner',text:'正在读取…'}));const node=await ({telegram:renderTelegram,live:renderLive,runs:renderRuns,context:renderContext,settings:renderSettings,models:renderModels,agents:renderAgents,files:renderFiles,skills:renderSkills,logs:renderLogs}[next])();if(generation===epoch)$('content').replaceChildren(node);}
+async function show(next){if(next!==view&&!canLeave())return;view=next;$('notice').hidden=true;const generation=++epoch;location.hash=next;$('pageTitle').textContent=titles[next][0];$('pageDescription').textContent=titles[next][1];for(const b of $('nav').children)b.classList.toggle('active',b.dataset.view===next);$('content').replaceChildren(el('div',{class:'spinner',text:'正在读取…'}));const node=await ({telegram:renderTelegram,live:renderLive,runs:renderRuns,context:renderContext,memory:renderMemory,settings:renderSettings,models:renderModels,agents:renderAgents,files:renderFiles,skills:renderSkills,logs:renderLogs}[next])();if(generation===epoch)$('content').replaceChildren(node);}
 for(const [id,[label]]of Object.entries(titles)){const b=btn(label,()=>show(id));b.prepend(el('span',{class:'nav-icon',text:icons[id]}));b.dataset.view=id;$('nav').append(b);}
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';try{await connect();}catch(err){$('loginError').textContent=err.message;}};
 $('agentSelect').onchange=()=>task(async()=>{if(!canLeave()){$('agentSelect').value=agentId;return;}agentId=$('agentSelect').value;selectedHistoryEvents.clear();selectedRunRecords.runs.clear();selectedRunRecords.context.clear();selectedRun=null;currentFile=null;contextRequest=null;await show(view);});

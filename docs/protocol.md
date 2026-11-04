@@ -139,3 +139,13 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 - 两个接口都按 agent 隔离；执行或发送中返回409，先结束再清理。选择列表不接受跨 agent 或路径片段。仍保留的快照可用文件目录恢复上下文列表，不依赖已删除的执行元数据。
 - `GET /v1/runs?agent=<id>&scope=execution|context`：执行列表只列仍有执行记录的轮次（最多100）；上下文列表按实际快照目录列出，支持独立清理后的旧快照；列表最多100轮，全部清理不受此限制。
 - `GET /v1/logs/storage` 返回数据库位置、logs表条数和时间范围。`DELETE /v1/logs` 接受 `{"mode":"before","before":"2026-01-01T00:00:00Z"}` 或 `{"mode":"all"}`；影响所有 agent 的程序日志，不影响工具、聊天或上下文。标准输出由启动器管理，不在此接口范围内。
+
+### 记忆检查与试算
+
+以下接口同样需要管理Bearer令牌，按agent隔离，使用运行组件的有效配置：
+
+- GET /v1/agents/:agent/memory/inspect：返回原文、实际索引（省略向量矩阵）、计算因素、来源位置和参数；无模型调用。
+- GET /v1/agents/:agent/memory/inspect?id=<memory_id>：返回该条原文及包含vectors的完整实际索引；不存在的编号报错。
+- POST /v1/agents/:agent/memory/simulate：正文为{"query":"检索材料","mode":"recall"}；mode可为recall或search，默认recall。query去空白后1～20000字符，未知字段拒绝。同agent正在试算时返回409。
+
+返回query原材料和扩展、实际辅助调用记录、所有条目的相关性/状态贡献/候选和选中排名、后续联想/预算结果及output。仅显式POST可能产生模型费用；不创建事件、不调用主模型、不写真实记忆/索引/状态或召回计数。日志可以记录诊断信息。检索材料不自动附最近对话，随机分支按本次独立抽签。

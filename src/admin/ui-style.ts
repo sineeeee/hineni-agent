@@ -17,4 +17,6 @@ export const style = String.raw`
 .history-select-row>.event{flex:1;min-width:0}
 .history-delete-actions{margin:0 0 12px}
 .once-task-form label{display:grid;gap:6px}.once-task-form input,.once-task-form textarea{width:100%}
+
+.memory-page .toolbar{flex-wrap:wrap}.memory-page textarea{width:100%;margin:10px 0;min-height:90px}.memory-table-scroll{overflow:auto;max-height:65vh;border:1px solid var(--line);border-radius:8px}.memory-table{border-collapse:collapse;width:100%;font-size:12px;min-width:1120px}.memory-table th{position:sticky;top:0;background:#eef4ef;z-index:1;white-space:nowrap;text-align:left}.memory-table td,.memory-table th{padding:10px 12px;border-bottom:1px solid #e0e8e1;vertical-align:top}.memory-table td:not(:first-child){font-variant-numeric:tabular-nums;white-space:nowrap}.memory-table .memory-summary{max-width:350px;min-width:210px;text-align:left;white-space:normal;line-height:1.7;color:#345b51}.memory-table tr.memory-selected{background:#edf6ef}.memory-table tr:hover{background:#f3f6f1}.memory-page details>summary{cursor:pointer;padding:8px 0}.memory-page .json-tree{max-height:50vh}
 `;
