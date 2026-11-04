@@ -40,6 +40,11 @@
 | `stateTokens` | `1000` | 情绪、念头、交流间隔预算 |
 | `safetyTokens` | `16384` | 模型输入输出之外的安全余量 |
 | `trace` | `true` | 保存每次实际上下文快照 |
+| `spark` | `false` | 生成本轮临时想象灵感 |
+| `sparkProbability` | `1` | 每轮尝试灵感的概率（0～1） |
+| `sparkInputTokens` | `4000` | 灵感模型可读的人格与本轮输入总量 |
+| `sparkTokens` | `120` | 传给主模型的灵感文字上限 |
+| `sparkTimeoutMs` | `6000` | 等待灵感模型的最长毫秒数 |
 
 ## memory
 
@@ -110,6 +115,8 @@
 | `repeatedStimulusMultiplier` | `0.5` | 提示词中的重复刺激减弱参考 |
 | `reportChars` | `120` | 当前情绪原因的字数限制 |
 | `thoughtContextItems` | `1` | 每轮呈现的念头数 |
+| `thoughtContextProbability` | `1` | 旧念头进入本轮上下文的概率（0～1） |
+| `focusContextProbability` | `1` | 关注点进入本轮上下文的概率（0～1） |
 | `thoughtContextTokens` | `300` | 单条念头容量 |
 | `thoughtHalfLifeHours` | `6` | 念头优先级衰减半衰期（小时） |
 | `focusMax` | `2` | 当前关注点数量 |
@@ -119,7 +126,7 @@
 | `emotionHalfLifeMinutes` | `90` | 短期情绪回零半衰期（分钟） |
 | `moodDeltaLimit` | `3` | 每轮整体心情增减上限 |
 | `dimensionDeltaLimit` | `5` | 每轮单维情绪或驱动力增减上限 |
-| `inputTokens` | `6000` | 后台心情判断的本轮材料容量 |
+| `inputTokens` | `6000` | 后台心情判断的本轮材料与最近交流总容量 |
 | `timeoutMs` | `10000` | 后台心情 API 超时（毫秒） |
 | `thoughtsMax` | `3` | 当前最多保留的念头数 |
 | `thoughtTtlHours` | `24` | 念头最长保留时间（小时） |
@@ -216,7 +223,7 @@ mcp[]：name、enabled、command/args 或 url（二选一）、env、headersEnv�
 
 ## Prompt 覆盖
 
-prompts 可设置 system / query / searchDescription / rerank / emotion，值为完整提示词。未填时使用内置模板；system 默认读取当前 agent 的 prompts/system.md。状态和表达参数自动渲染，主模型不需要额外调用情绪记录工具。
+prompts 可设置 system / query / searchDescription / rerank / emotion / stateExpression，值为完整提示词。system 默认读取当前 agent 的 prompts/system.md；其余先读个人 prompts/auxiliary.yaml，再回退内置默认。状态和表达参数自动渲染，主模型不需要额外调用情绪记录工具。
 
 ## 路径与生效
 

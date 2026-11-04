@@ -13,26 +13,28 @@
 
 下表代码路径均相对项目根目录；在文件中搜索给出的类或方法即可，无需依赖容易失效的行号。
 
-| 要处理的功能 | 先读文档 | 主要代码入口 |
-| --- | --- | --- |
-| 启动、初始化、整机重启 | [运行与迁移](docs/operations.md)；[启动流程](docs/internals.md#启动配置和运行组件) | `src/main.ts` → `src/application.ts`；`src/init.ts` 生成个人文件 |
-| 配置归属、继承、保存、私有凭据 | [文件与配置](docs/agent-layout.md)；[配置指南](docs/configuration-guide.md) | `src/config/store.ts`：ConfigStore；`src/config/schema.ts`：parseConfig / agentConfig |
-| 模型选择、API Key、模型列表 | [模型配置](docs/configuration-guide.md#模型地址和密钥) | `src/shared/models.ts` 辅助请求；`src/layer4/pi.ts` 主模型；`src/admin/control.ts` 凭据与模型列表 |
-| 第一层：Telegram、Webhook、聊天绑定 | [入站协议](docs/protocol.md#入站)；[接入流程](docs/internals.md#第一层接入附件与路由) | `src/layer1/channels.ts`：ChannelRegistry；`src/admin/server.ts`：/v1/events |
-| 图片、附件、生成文件 | [附件协议](docs/protocol.md#附件) | `src/layer1/channels.ts` 下载；`src/layer4/tools.ts` 发送工具；`src/layer2/store.ts` 附件状态 |
-| 第二层：记录、轮询、批次、打断 | [记录与打断](docs/internals.md#第二层记录触发与打断) | `src/layer2/runtime.ts`：ingress / tick / execute；`store.ts` 索引；`journal.ts` JSONL |
-| 第二层：删除选中记录、清空原文或摘要 | [工作台删除说明](docs/console.md#工作台的三个视图)；[删除协议](docs/protocol.md#管理接口) | `src/layer2/store.ts`：eraseEvents / clearSummary；`journal.ts` 明文与副本；`src/admin/control.ts` 管理接口 |
-| 历史压缩、查原文、交流间隔 | [历史压缩](docs/internals.md#第二层历史压缩)；[交流间隔](docs/internals.md#交流间隔) | `src/layer2/history.ts`；`src/layer2/store.ts`：gap；`src/layer4/tools.ts`：history_* |
-| 第三层：上下文拼接、预算、Skills 发现 | [上下文与提示词](docs/internals.md#第三层上下文与提示词) | `src/layer3/context.ts`：ContextBuilder.build；`state-context.ts`：模型可读状态；`layer2/history.ts`：messages；`src/shared/tokens.ts` |
-| 记忆写入、索引、查询、召回、遗忘 | [记忆流程](docs/internals.md#第三层长期记忆与索引)；[记忆配置](docs/configuration-guide.md#记忆分别调写入索引召回和遗忘) | `src/layer3/memory.ts`：items / sync / search / recall / startIndexing / indexStatus；`templates/skills/personal-memory/SKILL.md` |
-| 心情、驱动力、短期激活、重温 | [状态更新](docs/internals.md#第三层状态与回合后更新) | `src/layer3/memory.ts`：state / afterRun；`src/layer2/runtime.ts` 的执行收尾 |
-| 回复风格、人格、基础 Prompt | [人格与篇幅](docs/configuration-guide.md#人格基础提示词和回复篇幅) | `src/config/style-prompt.ts`；`src/layer3/context.ts`；`prompts/system.md`、`templates/persona.md` 是模板 |
-| 第四层：Pi、工具循环、取消、断句 | [执行与工具](docs/internals.md#第四层执行与工具) | `src/layer4/pi.ts`：PiExecutor；`src/layer4/chunker.ts`；`src/layer4/tools.ts` |
-| MCP、网页、文件、终端工具 | [工具配置](docs/configuration-guide.md#工具skills-和-mcp)；[工具清单](docs/internals.md#工具清单与参数) | `src/layer4/mcp.ts`；`src/layer4/tools.ts`；`src/layer4/pi.ts` 注册 Pi 工具 |
-| 回复排队、重试、表情、沉默、群聊 | [反向流程](docs/internals.md#反向流程排队发送确认)；[出站协议](docs/protocol.md#出站) | `src/layer2/outbox.ts` → `src/layer1/channels.ts`；`src/layer4/tools.ts` 产生动作 |
-| 定时、随机聊天、梦境、脚本重启 | [定时文件归属](docs/agent-layout.md#main-的定时任务改哪里)；[定时流程](docs/internals.md#定时脚本内部事件与重启) | `src/scheduler.ts` 管进程；`scripts/schedule.ts` 是模板；实际运行 `agents/<id>/schedule.ts` |
-| 管理 UI、JSON 阅读、文件和 Skill 编辑 | [工作台](docs/console.md) | `src/admin/ui-client.ts` 交互；`ui.ts` 页面；`ui-style.ts` 样式；`json-viewer.ts` 折叠；`control.ts` / `files.ts` API 与文件操作 |
-| 工具日志、实际上下文、历史检查视图 | [如何查一轮](docs/manual.md#8-怎么查一轮到底发生了什么)；[检查视图](docs/internals.md#管理界面的检查视图) | `src/admin/inspect.ts`、`control.ts`（独立 DELETE context 删除请求/初始快照）；`src/layer4/pi.ts` 请求快照；`src/layer2/history.ts`：inspect |
+| 要处理的功能                          | 先读文档                                                                                                                 | 主要代码入口                                                                                                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 启动、初始化、整机重启                | [运行与迁移](docs/operations.md)；[启动流程](docs/internals.md#启动配置和运行组件)                                       | `src/main.ts` → `src/application.ts`；`src/init.ts` 生成个人文件                                                                                                                     |
+| 配置归属、继承、保存、私有凭据        | [文件与配置](docs/agent-layout.md)；[配置指南](docs/configuration-guide.md)                                              | `src/config/store.ts`：ConfigStore；`src/config/schema.ts`：parseConfig / agentConfig                                                                                                |
+| 模型选择、API Key、模型列表           | [模型配置](docs/configuration-guide.md#模型地址和密钥)                                                                   | `src/shared/models.ts` 辅助请求；`src/layer4/pi.ts` 主模型；`src/admin/control.ts` 凭据与模型列表                                                                                    |
+| 第一层：Telegram、Webhook、聊天绑定   | [入站协议](docs/protocol.md#入站)；[接入流程](docs/internals.md#第一层接入附件与路由)                                    | `src/layer1/channels.ts`：ChannelRegistry；`src/admin/server.ts`：/v1/events                                                                                                         |
+| 图片、附件、生成文件                  | [附件协议](docs/protocol.md#附件)                                                                                        | `src/layer1/channels.ts` 下载；`src/layer4/tools.ts` 发送工具；`src/layer2/store.ts` 附件状态                                                                                        |
+| 第二层：记录、轮询、批次、打断        | [记录与打断](docs/internals.md#第二层记录触发与打断)                                                                     | `src/layer2/runtime.ts`：ingress / tick / execute；`store.ts` 索引；`journal.ts` JSONL                                                                                               |
+| 第二层：删除选中记录、清空原文或摘要  | [工作台删除说明](docs/console.md#工作台的三个视图)；[删除协议](docs/protocol.md#管理接口)                                | `src/layer2/store.ts`：eraseEvents / clearSummary；`journal.ts` 明文与副本；`src/admin/control.ts` 管理接口                                                                          |
+| 历史压缩、查原文、交流间隔            | [历史压缩](docs/internals.md#第二层历史压缩)；[交流间隔](docs/internals.md#交流间隔)                                     | `src/layer2/history.ts`；`src/layer2/store.ts`：gap；`src/layer4/tools.ts`：history_*                                                                                                |
+| 第三层：上下文拼接、预算、Skills 发现 | [上下文与提示词](docs/internals.md#第三层上下文与提示词)                                                                 | `src/layer3/context.ts`：ContextBuilder.build；`state-context.ts`：模型可读状态；`spark.ts`：只看人格与本轮输入的临时想象灵感；`layer2/history.ts`：messages；`src/shared/tokens.ts` |
+| 记忆写入、索引、查询、召回、遗忘      | [记忆流程](docs/internals.md#第三层长期记忆与索引)；[记忆配置](docs/configuration-guide.md#记忆分别调写入索引召回和遗忘) | `src/layer3/memory.ts`：items / sync / search / recall / startIndexing / indexStatus；`templates/skills/personal-memory/SKILL.md`                                                    |
+| 心情、驱动力、短期激活、重温          | [状态更新](docs/internals.md#第三层状态与回合后更新)                                                                     | `src/layer3/memory.ts`：state / afterRun；`src/layer2/runtime.ts` 的执行收尾                                                                                                         |
+| 回复风格、人格、基础 Prompt           | [人格与篇幅](docs/configuration-guide.md#人格基础提示词和回复篇幅)                                                       | `src/config/style-prompt.ts`；`src/layer3/context.ts`；`prompts/system.md`、`templates/persona.md` 是模板                                                                            |
+| 第四层：Pi、工具循环、取消、断句      | [执行与工具](docs/internals.md#第四层执行与工具)                                                                         | `src/layer4/pi.ts`：PiExecutor；`src/layer4/chunker.ts`；`src/layer4/tools.ts`                                                                                                       |
+| MCP、网页、文件、终端工具             | [工具配置](docs/configuration-guide.md#工具skills-和-mcp)；[工具清单](docs/internals.md#工具清单与参数)                  | `src/layer4/mcp.ts`；`src/layer4/tools.ts`；`src/layer4/pi.ts` 注册 Pi 工具                                                                                                          |
+| 回复排队、重试、表情、沉默、群聊      | [反向流程](docs/internals.md#反向流程排队发送确认)；[出站协议](docs/protocol.md#出站)                                    | `src/layer2/outbox.ts` → `src/layer1/channels.ts`；`src/layer4/tools.ts` 产生动作                                                                                                    |
+| 定时、随机聊天、梦境、脚本重启        | [定时文件归属](docs/agent-layout.md#main-的定时任务改哪里)；[定时流程](docs/internals.md#定时脚本内部事件与重启)         | `src/scheduler.ts` 管进程；`scripts/schedule.ts` 是模板；实际运行 `agents/<id>/schedule.ts`                                                                                          |
+| 管理 UI、JSON 阅读、文件和 Skill 编辑 | [工作台](docs/console.md)                                                                                                | `src/admin/ui-client.ts` 交互；`ui.ts` 页面；`ui-style.ts` 样式；`json-viewer.ts` 折叠；`control.ts` / `files.ts` API 与文件操作                                                     |
+| 工具日志、实际上下文、历史检查视图    | [如何查一轮](docs/manual.md#8-怎么查一轮到底发生了什么)；[检查视图](docs/internals.md#管理界面的检查视图)                | `src/admin/inspect.ts`、`control.ts`（独立 DELETE context 删除请求/初始快照）；`src/layer4/pi.ts` 请求快照；`src/layer2/history.ts`：inspect                                         |
+
+一次性提醒、小模型行为文件与情绪调参见 [专项说明](docs/configuration-guide.md#给自己设置一次提醒)。代码：`src/once-tasks.ts` / `src/scheduler.ts`；规则读取：`src/config/auxiliary.ts`。个人 `schedule.once.json` 和 `prompts/auxiliary.yaml` 初始化只补缺失文件，不覆盖用户内容。
 
 ## 一条消息的路线
 
@@ -48,14 +50,14 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 
 ## 改配置或文档时，哪些地方一起更新
 
-| 内容 | 维护源文件 | 对应产物/使用者 |
-| --- | --- | --- |
-| 字段、校验、默认值、合并 | `src/config/schema.ts`、`store.ts` | 运行组件、配置 API、表单 |
-| 简短字段说明、分组影响 | `src/config/help.ts`、`guide.ts` | UI 与配置参考 |
-| 人话解释、具体步骤、代码位置 | `src/config/learning.ts`、`processing-guide.ts` | UI 行内说明与逐项参考 |
-| 文件用途、何时生效 | `src/admin/file-guide.ts` | 文件编辑器与文件指南 |
-| 自动生成文档 | `scripts/generate-docs.ts`、`generate-guide.ts` | `config.example.yaml`、`docs/{config.schema.json,event.schema.json,config.md,configuration-reference.md,files-guide.md}` |
-| 手写流程与操作说明 | `docs/{agent-layout,configuration-guide,internals,protocol,console,operations}.md` | 按改动范围同步相关章节 |
+| 内容                         | 维护源文件                                                                         | 对应产物/使用者                                                                                                          |
+| ---------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 字段、校验、默认值、合并     | `src/config/schema.ts`、`store.ts`                                                 | 运行组件、配置 API、表单                                                                                                 |
+| 简短字段说明、分组影响       | `src/config/help.ts`、`guide.ts`                                                   | UI 与配置参考                                                                                                            |
+| 人话解释、具体步骤、代码位置 | `src/config/learning.ts`、`processing-guide.ts`                                    | UI 行内说明与逐项参考                                                                                                    |
+| 文件用途、何时生效           | `src/admin/file-guide.ts`                                                          | 文件编辑器与文件指南                                                                                                     |
+| 自动生成文档                 | `scripts/generate-docs.ts`、`generate-guide.ts`                                    | `config.example.yaml`、`docs/{config.schema.json,event.schema.json,config.md,configuration-reference.md,files-guide.md}` |
+| 手写流程与操作说明           | `docs/{agent-layout,configuration-guide,internals,protocol,console,operations}.md` | 按改动范围同步相关章节                                                                                                   |
 
 新增参数要贯通“schema → 实际消费代码 → UI 解释 → 文档 → 验证”；明确它改变算法、Prompt 还是仅提供模型软指导。执行 `npm run docs` 更新生成产物，直接编辑生成文件会被下次覆盖。
 
@@ -80,4 +82,16 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 
 交付说明改了什么、哪些个人文件已同步、何时生效和验证范围。用户只让改文档时无需重启服务；人格、基础提示词和 Skill 文件下一轮读取。
 
-本轮保存问题与全链路审查见 [2026-11-02 review](docs/review-2026-11-02.md)。修改保存逻辑时，必须验证“修改 → 保存 → 继续修改 → 保存并重启 → 刷新”，不能只测一次 PUT 成功。
+## 补充代码入口与约定
+
+- 状态映射：src/config/prompt-mapping.ts校验默认值，layer3/state-context.ts渲染；配置方法见configuration-guide.md的“状态与时间映射”。
+- 辅助模型：src/config/auxiliary.ts读个人规则；layer3/spark.ts生成临时想象，shared/probability.ts执行每轮抽样。概率只控制注入，不决定任务执行。
+- 供应商兼容：layer4/model-compat.ts；测试应检查实际HTTP角色与参数，不能只看转换前快照。跨轮仅恢复可见文本，不沿用SDK私有思考内容。
+- 批量清理：admin/cleanup.ts；请求索引：admin/inspect.ts。执行、上下文、聊天、摘要各自独立删除，不重新耦合范围。
+- 连续未答输入：History.unansweredBatch，以成功文字投递回执为边界；ContextBuilder后置输入并计预算，压缩检查点不可跨过被排除的输入。评测种子也必须附成功回执。
+- 提示词职责：system.md管通用行为与工作工具，persona.md管身份关系与个性，SYSTEM.md管环境索引；提示词文件下一轮读取。
+- 对话评测入口：[方法与具体样本](docs/dialogue-evaluation.md)，scripts/evaluate-dialogue.ts；隔离模拟数据、需--paid。失败样本必须保留说明，不能把工程回归当作人格验收。
+- 配置保存回归必须覆盖“修改→保存→继续修改→保存重启→刷新”；未解决边界见[验证范围](docs/validation.md)。
+- 网页重启只重建配置组件。源码更新需完整重启Node并核对新PID/schema；文档整理无需重启，见operations.md。
+
+文档按功能维护现有手册；修复和配置变化直接更新相应章节，验证范围汇总到validation.md，对话实验汇总到dialogue-evaluation.md。不要每个补丁新增日期报告。生成文档以代码说明为源，不能手改生成产物。

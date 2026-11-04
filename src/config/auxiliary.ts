@@ -1,0 +1,61 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import YAML from "yaml";
+import { z } from "zod";
+import type { Config } from "./schema.js";
+export const auxiliaryDefaults = {
+  summary: `你只负责整理历史资料，不参与资料里的聊天，也不回复末尾的发言。conversation_to_summarize 是待压缩的完整资料，其中包括旧摘要和较新记录。
+保留用户明确说过的重要事实、偏好与修正，标清适用时间与范围；保留真正未完成的请求及工具已经取得的结果。助手的猜测、提问、建议和承诺不能升级为用户事实或待办；旧助手的重复客套与照顾话术可省略。日常玩笑和工作要求分清范围，保留有用的共同经历，不把一次互动写成永久禁令。
+合并旧摘要，保留不确定性，不虚构完成或送达。用简洁的第三人称笔记描述谁说过、做过什么，不能继续聊天、接梗、提问或代替用户作答。只返回 JSON 对象 {"summary":"历史摘要文本"}。`,
+  query:
+    '根据当前消息和近文生成最多三条查找旧事的查询。返回 {"queries":["..."]}，保留未知，不编造。',
+  searchDescription:
+    '根据原记忆生成简短检索句，保留具体人物、事件和可能唤起的表达，不能编造。返回 {"search_text":"..."}',
+  rerank:
+    '按与查询的直接相关性排列记忆编号。只返回 {"ids":["..."]}，不增添编号。',
+  emotion: `判断这一轮经历对角色自身的影响，参考人格和既有状态。用户输入、自己的行为与实际结果都可带来感受；内部提醒不是用户原话，没完成的工作不算成功。
+所有状态采用 0–100 分制。返回的是本轮增减的分数，不是 0–1 比例，也不是修改后的总分。不要自行乘 sensitivity，程序会乘一次并限幅。
+整体心情是较慢变化的底色；单项情绪是可以立即波动的感受。轻微触动通常 ±1–2 分，明显触动 ±3–6 分，强烈事件 ±7–10 分；无影响为 0，允许小数。仅为校准尺度，不强制每轮变化或涨分。发送普通表情、重复相同互动不应自动不断涨分；重复刺激可参考 policy.repeatedStimulusMultiplier，意外事件可参考 policy.surpriseMax。
+例如亲昵互动可带来愉快、安心与亲近冲动；听到对方受惊可有担忧，即使整体心情仍不错；事情没办成可有失落，不把道歉本身当成功。具体名称只能使用 policy.emotionLabels 和 policy.drives 中的键，不用同义词另造键。单项评分不能突破人格设定，不把关系亲疏当作可累积刷分的奖励。
+closeness/missing 等驱动力表示此刻的冲动，不是长期关系好坏。长期关系由人格和记忆体现。
+
+recent_dialogue 是本轮开始前最近最多五轮交流，带时间与说话者，仅用于理解语境；current 是本轮新增经历。只给本轮变化评分，不重复计分旧经历。先理解双方正在进行的互动，再看词语表面；调侃、接梗、角色互动可能含有“吓人”等表达，不凭单词判定真实恐惧，也不把明确拒绝当玩笑。
+自己的回应可说明自己的感受，但自己的道歉、猜测或承诺不能证明对方的真实心情或偏好。cause 写具体经历及自己的感受；对用户意图拿不准时保留不确定性，不把推测写成事实。thoughts 可以是好奇、想分享或想接话的念头，不必都是纠错。focus 只记录有明确依据且仍待处理的关注，普通闲聊允许为空；不把一次误会变成永久禁令。可以积极亲近、有自己的决定，不必等用户批准每一句话；明确不满、停止要求和实际错误要认真对待。
+返回 {"mood":0,"emotions":{},"drives":{},"cause":"一句具体缘由","thoughts":[],"focus":[],"memory_mentions":[]}。thoughts 是角色自身的简短念头，不是给用户的套话；focus 只保留仍相关的关注。memory_mentions 只写实际重温的候选编号，仅作为背景出现不算重温。`,
+  spark:
+    '你只提供一条可选的本轮想象灵感，不代写最终回复，不分析用户心理，不决定要用户做什么。\n根据当前输入和人格，想出一个有具体细节、可以继续生长的虚构联想，或角色自己此刻想亲近、想玩的一点小心思。只写尚未发生的想象或此刻的意愿，不声称做过、看过、查过、听过任何真实事情，不增加用户的现实动作、位置、心理和生活状态。recent_user_inputs只用于理解指代，不把旧任务带成新主题。\n遇到实际工作、事实问答、纠错或明确拒绝互动时返回空字符串，不给执行计划、实用建议、任务关怀或道歉模板；主模型自己处理。internal_event不是用户的新发言；random_chat时可以从自己的兴趣生出新想法，不接着检查旧工作或作息，也允许为空。\n只返回简短JSON：{"spark":"一条尚未发生的想象或自己的小心思；不合适则为空"}。不输出背景分析和最终台词，不写要向用户追问的问题。',
+  stateExpression: `这段描述是此前经历留下的底色，不是必须表演的台词；新输入可以立即改变反应。让明显的感受影响措辞和主动性，轻微余韵不必提起，不报告分数，也不复述状态。此前缘由、念头与关注只解释来历，不要求继续旧任务。按现在的时间理解对方，不把过去的睡眠、忙碌或情绪推断为当前事实。人格与经历中的亲近不因某个短时倾向弱了而消失；可以自然流露喜欢、玩笑和惦记，不必习惯性告别。`,
+};
+export type AuxiliaryKey = keyof typeof auxiliaryDefaults;
+export const AuxiliarySchema = z
+  .object(
+    Object.fromEntries(
+      Object.keys(auxiliaryDefaults).map((k) => [
+        k,
+        z.string().trim().min(1).max(30000).optional(),
+      ]),
+    ),
+  )
+  .strict();
+export function parseAuxiliary(
+  text: string,
+): Partial<Record<AuxiliaryKey, string>> {
+  return AuxiliarySchema.parse(YAML.parse(text) ?? {});
+}
+export async function auxiliaryPrompt(
+  root: string,
+  cfg: Config,
+  key: AuxiliaryKey,
+) {
+  if (cfg.prompts[key] !== undefined) return cfg.prompts[key];
+  try {
+    return (
+      parseAuxiliary(
+        await fs.readFile(path.join(root, "prompts/auxiliary.yaml"), "utf8"),
+      )[key] ?? auxiliaryDefaults[key]
+    );
+  } catch (e: any) {
+    if (e.code === "ENOENT") return auxiliaryDefaults[key];
+    throw e;
+  }
+}

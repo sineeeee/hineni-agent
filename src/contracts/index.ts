@@ -90,7 +90,7 @@ export interface Channel {
   stop?(): Promise<void>;
 }
 export interface ModelMessage {
-  role: "user" | "assistant";
+  role: "system" | "user" | "assistant";
   content:
     | string
     | Array<

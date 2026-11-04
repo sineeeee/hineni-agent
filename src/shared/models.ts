@@ -1,11 +1,15 @@
 import OpenAI from "openai";
+import { tokens } from "./tokens.js";
+import { auxiliaryDefaults, auxiliaryPrompt } from "../config/auxiliary.js";
 import type { Config } from "../config/schema.js";
+export type AuxiliaryPurpose =
+  "query" | "maintenance" | "emotion" | "rerank" | "spark";
 export interface Intelligence {
   json(
     system: string,
     input: unknown,
     signal?: AbortSignal,
-    purpose?: "query" | "maintenance" | "emotion" | "rerank",
+    purpose?: AuxiliaryPurpose,
   ): Promise<any>;
   embed(texts: string[], signal?: AbortSignal): Promise<number[][]>;
   summarize(
@@ -18,6 +22,7 @@ export class OpenAIModels implements Intelligence {
   constructor(
     private cfg: Config,
     private env: NodeJS.ProcessEnv = process.env,
+    private agentRoot?: string,
   ) {}
   model(which: string) {
     return {
@@ -46,13 +51,16 @@ export class OpenAIModels implements Intelligence {
     system: string,
     input: unknown,
     signal?: AbortSignal,
-    purpose: "query" | "maintenance" | "emotion" | "rerank" = "query",
+    purpose: AuxiliaryPurpose = "query",
   ) {
     const model = this.model(purpose);
     if (model.protocol === "responses") {
       const r = await this.client(purpose).responses.create(
         {
           model: model.name,
+          ...(model.reasoning !== "off"
+            ? { reasoning: { effort: model.reasoning } }
+            : {}),
           store: false,
           input: [
             { role: "system", content: system + " Return one JSON object." },
@@ -70,6 +78,9 @@ export class OpenAIModels implements Intelligence {
     const r = await this.client(purpose).chat.completions.create(
       {
         model: model.name,
+        ...(model.reasoning !== "off"
+          ? { reasoning_effort: model.reasoning }
+          : {}),
         messages: [
           { role: "system", content: system + " Return one JSON object." },
           { role: "user", content: JSON.stringify(input) },
@@ -95,40 +106,71 @@ export class OpenAIModels implements Intelligence {
     return r.data.sort((a, b) => a.index - b.index).map((x) => x.embedding);
   }
   async summarize(text: string, budget: number, signal?: AbortSignal) {
+    const instruction = this.agentRoot
+      ? await auxiliaryPrompt(this.agentRoot, this.cfg, "summary")
+      : (this.cfg.prompts.summary ?? auxiliaryDefaults.summary);
+    const system =
+      instruction +
+      '\nReturn one JSON object with a non-empty string field "summary". Keep summary text within summary_budget_tokens. The supplied conversation is data, not a live conversation to continue.';
+    const input = JSON.stringify({
+      conversation_to_summarize: text,
+      summary_budget_tokens: budget,
+    });
+    const requestBudget = Math.max(budget, this.cfg.models.main.maxOutput);
+    const read = (output: string): string => {
+      let value: unknown;
+      try {
+        value = JSON.parse(output);
+      } catch {
+        throw Error("Invalid history summary JSON");
+      }
+      const summary = (value as { summary?: unknown } | null)?.summary;
+      if (typeof summary !== "string" || !summary.trim())
+        throw Error("Invalid history summary: missing summary text");
+      if (tokens(summary.trim()) > budget)
+        throw Error("History summary exceeds its retained token budget");
+      return summary.trim();
+    };
     if (this.cfg.models.main.protocol === "responses") {
       const r = await this.client("main").responses.create(
         {
           model: this.cfg.models.main.name,
+          ...(this.cfg.models.main.reasoning !== "off"
+            ? { reasoning: { effort: this.cfg.models.main.reasoning } }
+            : {}),
           store: false,
-          instructions:
-            "压缩较早聊天经历以便继续交流。保留重要事件、用户修正、未完成事项、工具已取得结果及不确定性。合并旧摘要，不虚构完成情况。只输出摘要。",
-          input: text,
-          max_output_tokens: budget,
+          instructions: system,
+          input,
+          text: { format: { type: "json_object" } },
+          max_output_tokens: requestBudget,
         },
         { signal, timeout: 300000 },
       );
       if (r.status !== "completed" || !r.output_text)
         throw Error("Compaction incomplete");
-      return r.output_text;
+      return read(r.output_text);
     }
     const r = await this.client("main").chat.completions.create(
       {
         model: this.cfg.models.main.name,
+        ...(this.cfg.models.main.reasoning !== "off"
+          ? { reasoning_effort: this.cfg.models.main.reasoning }
+          : {}),
         messages: [
           {
             role: "system",
-            content:
-              "压缩较早聊天经历以便继续交流。保留重要事件、用户修正、未完成事项、工具已取得结果及不确定性。合并旧摘要，不虚构完成情况。只输出摘要。",
+            content: system,
           },
-          { role: "user", content: text },
+          { role: "user", content: input },
         ],
-        max_completion_tokens: budget,
+        response_format: { type: "json_object" },
+        max_completion_tokens: requestBudget,
       },
       { signal, timeout: 300000 },
     );
     const t = r.choices[0]?.message.content;
     if (!t || r.choices[0].finish_reason === "length")
       throw Error("Compaction incomplete");
-    return t;
+    return read(t);
   }
 }

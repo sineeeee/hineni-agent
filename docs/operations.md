@@ -14,6 +14,8 @@ Node.js 22.19+，推荐 24/26；npm；Bash。Python 脚本使用系统 python3 �
 
 ## 配置与重启
 
+网页的“保存并重启”会重读配置并重建运行组件，不会重新导入已经缓存的代码。更新源码后先 `npm run build`，再完整停止旧 Node 进程并执行 `npm start`。检查监听端口对应的新进程，不能把配置重载当成代码更新已生效。人格和提示词仍按下一轮读取规则生效。
+
 模型与运行参数写自己的 agents/<id>/config.yaml；公共渠道写根 config.yaml，保存后重启主程序。只改个人 scheduler 参数或脚本时，保存后单独重启该 agent 的定时脚本即可。各 agent 的人格、记忆、prompts/system.md、Skills：下一轮读取。各 agent 的调度脚本：保存后点“重启定时脚本”或使用工具。脚本失败会记录日志，5秒后重新启动；重启清零随机计时，不补跑过去的任务。
 
 网页新增 agent 后保存，会生成自己的 config.yaml、空 .env、schedule.ts 与提示词；重启补齐其他初始文件。共享 Skills 用 agents[].skills 路径；放入某 agent 的 skills/ 只给它使用。MCP stdio 使用 command/args/env，HTTP 使用 url/headersEnv；headersEnv 指向 JSON 请求头环境变量。
@@ -45,3 +47,5 @@ SQLite 丢失时，真实 JSONL、附件清单和检索索引文件仍在：新�
 ## Git 与本机数据
 
 Git 跟踪源码、锁文件、模板、配置样例和文档。实际 config.yaml、.env、agents/、data/、日志和构建产物不进入仓库。初次检出后按 README 执行 npm ci、npm run init、填写凭据、npm run build、npm start；init 生成根默认配置和独立的 main 目录，个人缺省项继承默认。Git 不是个人配置和记忆的备份，迁移时仍需备份上一节所列文件。
+
+程序诊断日志位于实际 dataDir/runtime.sqlite 的 logs 表；控制台“程序日志”支持按天数或全部手动清理（全局）。启动时重定向的标准输出是启动器管理的另一份文件，不由该按钮清理。执行工具文件和上下文快照分别在对应Tab清理，具体删除范围见 docs/console.md。

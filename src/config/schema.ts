@@ -16,6 +16,20 @@ const model = z
     compat: z.record(z.string(), z.unknown()).default({}),
   })
   .strict();
+// Overrides must preserve absence: Zod's partial() still applies inner defaults.
+// Otherwise setting only reasoning silently replaces the inherited endpoint/model.
+const modelOverride = z
+  .object({
+    protocol: model.shape.protocol.removeDefault().optional(),
+    baseUrl: model.shape.baseUrl.removeDefault().optional(),
+    apiKeyEnv: model.shape.apiKeyEnv.removeDefault().optional(),
+    name: model.shape.name.removeDefault().optional(),
+    contextWindow: model.shape.contextWindow.removeDefault().optional(),
+    maxOutput: model.shape.maxOutput.removeDefault().optional(),
+    reasoning: model.shape.reasoning.removeDefault().optional(),
+    compat: model.shape.compat.removeDefault().optional(),
+  })
+  .strict();
 export const ConfigSchema = z
   .object({
     version: z.literal(1).default(1),
@@ -44,10 +58,11 @@ export const ConfigSchema = z
         embedding: model.default(() =>
           model.parse({ name: "text-embedding-3-small", maxOutput: 1 }),
         ),
-        query: model.partial().optional(),
-        maintenance: model.partial().optional(),
-        emotion: model.partial().optional(),
-        rerank: model.partial().optional(),
+        query: modelOverride.optional(),
+        maintenance: modelOverride.optional(),
+        emotion: modelOverride.optional(),
+        rerank: modelOverride.optional(),
+        spark: modelOverride.optional(),
       })
       .strict()
       .default(() => ({
@@ -81,6 +96,11 @@ export const ConfigSchema = z
         stateTokens: n(1000, 100),
         safetyTokens: n(16384, 100),
         trace: flag(),
+        spark: flag(false),
+        sparkProbability: z.number().min(0).max(1).default(1),
+        sparkInputTokens: n(4000, 300),
+        sparkTokens: n(120, 20),
+        sparkTimeoutMs: n(6000, 100),
       })
       .strict()
       .default(() => ({
@@ -89,6 +109,11 @@ export const ConfigSchema = z
         stateTokens: 1000,
         safetyTokens: 16384,
         trace: true,
+        spark: false,
+        sparkProbability: 1,
+        sparkInputTokens: 4000,
+        sparkTokens: 120,
+        sparkTimeoutMs: 6000,
       })),
     memory: z
       .object({
@@ -175,6 +200,8 @@ export const ConfigSchema = z
         repeatedStimulusMultiplier: n(0.5),
         reportChars: n(120, 10),
         thoughtContextItems: n(1),
+        thoughtContextProbability: z.number().min(0).max(1).default(1),
+        focusContextProbability: z.number().min(0).max(1).default(1),
         thoughtContextTokens: n(300, 20),
         thoughtHalfLifeHours: n(6, 1),
         focusMax: n(2),
@@ -319,7 +346,7 @@ export const ConfigSchema = z
             targets: z.record(z.string(), TargetSchema).default({}),
             routes: z.array(TargetSchema).default([]),
             skills: z.array(z.string()).default([]),
-            main: model.partial().optional(),
+            main: modelOverride.optional(),
             overrides: z.record(z.string(), z.unknown()).default({}),
           })
           .strict(),

@@ -1,6 +1,6 @@
 # Hineni 完整手册
 
-本文是整个项目的阅读入口，面向使用者和接手项目的 AI。按 2026-11-02 的实际代码整理；描述的是程序已经怎样工作，不把设计设想当成已实现功能。默认值与当前安装值可能不同，当前值由根目录默认配置与 `agents/<id>/config.yaml` 的个人设置共同决定，个人字段优先。
+本文是整个项目的阅读入口，面向使用者和接手项目的 AI。描述的是程序已经怎样工作，不把设计设想当成已实现功能。默认值与当前安装值可能不同，当前值由根目录默认配置与 `agents/<id>/config.yaml` 的个人设置共同决定，个人字段优先。
 
 新版管理工作台操作见 [工作台使用与调试](console.md)：Telegram 接入单独填写 Chat ID；工作台区分原始记录、当前压缩视图和实际交接；各参数和文件旁都有作用、存储位置与生效说明。
 
@@ -27,9 +27,9 @@ AI 接手时先读 [AGENTS.md](../AGENTS.md)，按功能定位本文或其他文
 
 Hineni 是一个运行在电脑或 VPS 上的个人 agent 后端。聊天软件作为入口，我们自己的程序保存经历、选择上下文和管理记忆，再交给 Pi 执行模型和工具循环。
 
-当前安装只有一个 agent，编号 `main`，显示名 Hineni，Telegram 私聊已接通。普通回复回到触发来源，内部提醒没有指定来源时使用默认 Telegram 私聊。网页的本地测试入口也共享同一条经历，但回复放在本地收件箱。
+初始化创建 `main`，可在管理页新增独立 agent。Telegram 是否接通以当前渠道状态为准。普通回复回到触发来源，内部提醒没有指定来源时使用默认 Telegram 私聊。网页的本地测试入口也共享同一条经历，但回复放在本地收件箱。
 
-当前主进程是一个 Node.js 程序，内部有四个组件；调度脚本是子进程，MCP stdio 服务也可以是子进程。不是四套独立服务。程序目前在这台 Mac 上运行，尚未配置开机自启，也没有部署到 VPS。
+当前主进程是一个 Node.js 程序，内部有四个组件；调度脚本是子进程，MCP stdio 服务也可以是子进程。不是四套独立服务。支持本机或 VPS，开机自启按运行文档配置。
 
 ```mermaid
 flowchart TD
@@ -94,7 +94,7 @@ flowchart TD
 | 记忆召回、遗忘和联想          | memory/context                                          | 重启主程序                                   |
 | 心情变化幅度与回稳            | state/drives                                            | 重启主程序                                   |
 | 主动聊天时间、做梦、整理记忆  | scheduler 与 memory.sleepCron                           | 保存后重启主程序，避免脚本与主程序配置不一致 |
-| 更复杂的主动逻辑              | `agents/<id>/schedule.ts`                                   | 重启定时脚本                                 |
+| 更复杂的主动逻辑              | `agents/<id>/schedule.ts`                               | 重启定时脚本                                 |
 | 添加 Skill                    | `agents/main/skills/技能名/SKILL.md`                    | 下一轮发现                                   |
 | 接 MCP                        | mcp                                                     | 重启主程序；下一轮连接服务                   |
 
@@ -106,12 +106,12 @@ flowchart TD
 
 | 路径                                      | 内容与负责写入的一方                                                      |
 | ----------------------------------------- | ------------------------------------------------------------------------- |
-| `config.yaml`                             | 公共设施、公共默认值与 agent ID 清单                                                  |
-| `.env`                                    | 公共连接凭据、代理与管理口令                                                    |
-| `prompts/system.md`                       | 新建 agent 的基础提示词模板                                                        |
-| `agents/<id>/config.yaml` | 当前 agent 的独立设置 |
-| `agents/<id>/.env` | 当前 agent 的模型和工具凭据 |
-| `agents/<id>/prompts/system.md` | 当前 agent 的基础提示词 |
+| `config.yaml`                             | 公共设施、公共默认值与 agent ID 清单                                      |
+| `.env`                                    | 公共连接凭据、代理与管理口令                                              |
+| `prompts/system.md`                       | 新建 agent 的基础提示词模板                                               |
+| `agents/<id>/config.yaml`                 | 当前 agent 的独立设置                                                     |
+| `agents/<id>/.env`                        | 当前 agent 的模型和工具凭据                                               |
+| `agents/<id>/prompts/system.md`           | 当前 agent 的基础提示词                                                   |
 | `templates/`                              | 新 agent 的初始人格和三个基础 Skill 模板；已有 agent 文件单独维护         |
 | `agents/main/persona.md`                  | 人格原文；系统不自动改写                                                  |
 | `agents/main/SYSTEM.md`                   | 给 agent 阅读的环境说明；它不等于模型 system prompt                       |
@@ -127,7 +127,7 @@ flowchart TD
 | `agents/main/.runtime/traces/`            | 每轮编排完成时的上下文快照；图片只留类型和大小信息                        |
 | `agents/main/.runtime/memory-review.json` | Skill 约定的阅读进度；由模型执行 Skill 时维护，不是程序强制执行的任务账本 |
 | `data/runtime.sqlite`                     | 事件索引、执行与发送状态、日志、摘要检查点及缓存                          |
-| `agents/<id>/schedule.ts`                     | 主动行为政策脚本                                                          |
+| `agents/<id>/schedule.ts`                 | 主动行为政策脚本                                                          |
 
 JSONL 是真实经历，不会随历史压缩删除。SQLite 不只是加速：它还保存队列进度、运行状态和摘要检查点，正常备份必须保留。丢失库可以重建经历，但不能完整还原发送进度、日志等操作状态。
 
@@ -161,3 +161,7 @@ Telegram 普通私聊闭环已经实测；自动测试与 API 实测范围见[�
 需要查模型看到了什么，打开本轮 `agents/main/.runtime/traces/<run_id>.json`。它记录第三层交给第四层的初始 system 和 messages；后续每次主模型请求另存 .runtime/requests/<run_id>/<序号>.json。管理页“上下文”可逐次查看，工具明细可在“执行与工具”展开。
 
 需要查为什么没想起某条记忆，看日志里的 query fallback、semantic recall unavailable、rerank fallback 或 ranked memories；需要查心情是否更新，看 mood 日志和 state.json。详细排错步骤在[配置指南](configuration-guide.md#验证修改和排错)。
+
+## 清理调试结果
+
+执行与工具、上下文各自支持单条、勾选多轮与全部清理；它们不连带删除聊天、压缩摘要、长期记忆或配置。日志页显示实际数据库位置，可按多少天之前或全部手动清理。执行/发送中先结束再清理。具体范围见[控制台说明](console.md#执行上下文与程序日志清理)。

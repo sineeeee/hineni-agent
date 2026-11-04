@@ -12,6 +12,7 @@ import { icons, manifest } from "./icons.js";
 import { page } from "./ui.js";
 import { style } from "./ui-style.js";
 import { client } from "./ui-client.js";
+import { runCatalog } from "./inspect.js";
 import { controls, type AdminLifecycle } from "./control.js";
 export async function servers(
   config: ConfigStore,
@@ -185,16 +186,14 @@ export async function servers(
       },
     );
     app.get("/v1/logs", async () => runtime.db.logs(200));
-    app.get<{ Querystring: { agent?: string } }>("/v1/runs", async (req) =>
-      req.query.agent
-        ? runtime.db.db
-            .prepare(
-              "SELECT * FROM runs WHERE agent_id=? ORDER BY started_at DESC LIMIT 100",
-            )
-            .all(agent(req.query.agent))
-        : runtime.db.db
-            .prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT 100")
-            .all(),
+    app.get<{ Querystring: { agent?: string; scope?: string } }>(
+      "/v1/runs",
+      async (req) =>
+        req.query.agent
+          ? runCatalog(runtime, agent(req.query.agent), req.query.scope)
+          : runtime.db.db
+              .prepare("SELECT * FROM runs ORDER BY started_at DESC LIMIT 100")
+              .all(),
     );
     app.get("/v1/deliveries", async () =>
       runtime.db.db

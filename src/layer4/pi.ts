@@ -1,3 +1,4 @@
+import { modelCompat } from "./model-compat.js";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -150,10 +151,21 @@ export class PiExecutor implements Executor {
           return t.execute(callId, args, s, update);
         },
       }));
+      const guidelines = [
+        ...new Set(
+          all.flatMap((t) => ((t as any).promptGuidelines ?? []) as string[]),
+        ),
+      ].filter((rule) => !/PI_|coding assistant|harness/i.test(rule));
+      const systemPrompt =
+        req.context.system +
+        (guidelines.length
+          ? "\n[Tool usage]\n" +
+            guidelines.map((rule) => "- " + rule).join("\n")
+          : "");
       let requestIndex = 0;
       const agent = new Agent({
         initialState: {
-          systemPrompt: req.context.system,
+          systemPrompt,
           tools,
           model: {
             id: m.name,
@@ -165,7 +177,7 @@ export class PiExecutor implements Executor {
             provider: "openai",
             baseUrl: m.baseUrl,
             reasoning: m.reasoning !== "off",
-            compat: m.compat,
+            compat: modelCompat(m),
             input: ["text", "image"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             contextWindow: m.contextWindow,
@@ -185,6 +197,7 @@ export class PiExecutor implements Executor {
                 captured_at: new Date().toISOString(),
                 model: m.name,
                 protocol: m.protocol,
+                compat: model.compat,
                 context,
               },
               (_key, value) => {
@@ -291,7 +304,7 @@ export class PiExecutor implements Executor {
             m.contextWindow -
             m.maxOutput -
             cfg.context.safetyTokens -
-            tokens(req.context.system) -
+            tokens(systemPrompt) -
             tokens(
               JSON.stringify(
                 tools.map((t) => ({

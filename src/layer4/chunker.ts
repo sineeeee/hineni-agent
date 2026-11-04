@@ -30,8 +30,16 @@ export class Chunker {
         !fence &&
         (/[。！？\n]/.test(this.buffer[i]) ||
           (/[.!?]/.test(this.buffer[i]) && /\s/.test(this.buffer[i + 1] ?? "")))
-      )
-        cut = i + 1;
+      ) {
+        let end = i + 1;
+        // A closing quote/bracket may arrive in the next streamed delta.
+        // Keep punctuation pending until the following character or message end.
+        while (end < this.buffer.length && /[”’」』）》〉】〕〗〙〛"')\]]/.test(this.buffer[end]))
+          end++;
+        if (this.buffer[i] !== "\n" && end === this.buffer.length) continue;
+        cut = end;
+        i = end - 1;
+      }
     }
     if (cut) {
       const text = this.buffer.slice(0, cut).trim();

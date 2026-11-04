@@ -1,3 +1,9 @@
+import { stateContext } from "../src/layer3/state-context.js";
+import { parsePromptMapping } from "../src/config/prompt-mapping.js";
+import { tokens } from "../src/shared/tokens.js";
+import { OpenAIModels } from "../src/shared/models.js";
+import { createTurnSpark, sparkContext } from "../src/layer3/spark.js";
+import { modelCompat } from "../src/layer4/model-compat.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -152,6 +158,25 @@ test("chunker preserves order, drops unfinished text on cancel, keeps fenced cod
   c.discard();
   c.flush();
   assert.equal(out.length, 3);
+});
+test("chunker keeps streamed closing quotes with their sentence", () => {
+  const out: string[] = [];
+  const c = new Chunker((s) => out.push(s));
+  c.push("他说：“过来。");
+  assert.deepEqual(out, []);
+  c.push("”");
+  assert.deepEqual(out, []);
+  c.push("然后笑了。");
+  assert.deepEqual(out, ["他说：“过来。”"]);
+  c.flush();
+  assert.deepEqual(out, ["他说：“过来。”", "然后笑了。"]);
+  c.push("（就这样！");
+  c.push("）下一句");
+  assert.equal(out.at(-1), "（就这样！）");
+  c.discard();
+  c.push("最后一句。");
+  c.flush();
+  assert.equal(out.at(-1), "最后一句。");
 });
 test("history compacts only at capacity and keeps raw originals", async (t) => {
   const f = await fixture(t);
@@ -792,6 +817,7 @@ test("ready attachment uses original target, image appears once and trace exclud
     path.join(f.root, "prompts"),
     new History(f.db, f.config.current, llm),
     memory,
+    llm,
   );
   const context = await build.build(
     [a, b],
@@ -2217,6 +2243,7 @@ test("Responses Pi: reasoning + tools, callbacks, fresh session", async (t) => {
     assert.equal(req.url, "/v1/responses");
     assert.equal(payload.store, false);
     assert.equal(payload.reasoning.effort, "low");
+    assert.equal(payload.input[0].role, "system");
     assert.equal(payload.previous_response_id, undefined);
     assert.ok(
       payload.tools.some(
@@ -2297,6 +2324,7 @@ test("Responses Pi: reasoning + tools, callbacks, fresh session", async (t) => {
         name: "gpt-6-luna",
         protocol: "responses",
         reasoning: "low",
+        compat: modelCompat({ baseUrl: "https://api.deepseek.com" }),
         baseUrl: `http://127.0.0.1:${port}/v1`,
         apiKeyEnv: "TEST_MODEL_KEY",
       },
@@ -2336,6 +2364,7 @@ test("Responses Pi: reasoning + tools, callbacks, fresh session", async (t) => {
     messages: [
       { role: "user" as const, content: "Earlier question" },
       { role: "assistant" as const, content: "Earlier answer" },
+      { role: "system" as const, content: "Runtime reference only." },
       { role: "user" as const, content: "Write the file." },
     ],
     memories: [],
@@ -2348,6 +2377,20 @@ test("Responses Pi: reasoning + tools, callbacks, fresh session", async (t) => {
     context,
     signal: new AbortController().signal,
   });
+  for (const payload of requests) {
+    const backgroundIndex = payload.input.findIndex((x: any) =>
+      JSON.stringify(x.content ?? "").includes("Runtime reference only."),
+    );
+    assert.ok(
+      backgroundIndex > 0,
+      JSON.stringify(
+        payload.input.map((x: any) => ({ role: x.role, type: x.type })),
+      ),
+    );
+    assert.equal(payload.input[backgroundIndex].role, "system");
+    assert.equal(payload.input[backgroundIndex - 1].role, "assistant");
+    assert.equal(payload.input[backgroundIndex + 1].role, "user");
+  }
   assert.equal(result.reason, "complete", result.error ?? "");
   assert.equal(
     await fs.readFile(path.join(host.root, "workspace/result.txt"), "utf8"),
@@ -2475,21 +2518,53 @@ test("context deletion selects snapshots independently of history and summary", 
   assert.ok(
     f.db.db.prepare("SELECT id FROM runs WHERE id=?").get("context-delete"),
   );
+  const orphan = path.join(base, "requests", "orphan-one");
+  await fs.mkdir(orphan, { recursive: true });
+  await fs.writeFile(path.join(orphan, "0.json"), "{}");
+  const cleared = await server.api.inject({
+    method: "DELETE",
+    url: "/v1/agents/main/runs/orphan-one/context",
+    headers,
+    payload: { mode: "selected", request: "0.json" },
+  });
+  assert.equal(cleared.statusCode, 200, cleared.body);
+  const contexts = (
+    await server.api.inject({
+      url: "/v1/runs?agent=main&scope=context",
+      headers,
+    })
+  ).json();
+  assert.equal(
+    contexts.some((r: any) => r.id === "orphan-one"),
+    false,
+  );
 });
 
 test("auxiliary JSON and compaction use selected protocol; Responses rejects incomplete output", async (t) => {
   const { OpenAIModels } = await import("../src/shared/models.js");
   const seen: any[] = [];
   let incomplete = false;
+  let invalidSummary = false;
   const server = http.createServer(async (req, res) => {
     let raw = "";
     for await (const c of req) raw += c;
     const body = JSON.parse(raw);
     if (body.text?.format?.type === "json_object")
-      assert.match(JSON.stringify(body.input), /json/i);
+      assert.match(
+        JSON.stringify(body.input) + String(body.instructions ?? ""),
+        /json/i,
+      );
     seen.push({ url: req.url, body });
-    const text =
-      body.text || body.response_format ? '{"queries":["test"]}' : "summary";
+    const material =
+      req.url === "/v1/responses" ? body.input : body.messages?.at(-1)?.content;
+    const isSummary =
+      typeof material === "string" &&
+      material.includes("conversation_to_summarize");
+    const text = isSummary
+      ? invalidSummary
+        ? '{"reply":"继续聊天"}'
+        : '{"summary":"summary"}'
+      : '{"queries":["test"]}';
     res.setHeader("content-type", "application/json");
     res.end(
       JSON.stringify(
@@ -2529,11 +2604,38 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
         },
       ],
       channels: [{ id: "local", type: "webhook" }],
-      models: { main: model, fast: model },
+      models: {
+        main: { ...model, reasoning: "high" },
+        fast: { ...model, reasoning: "low" },
+        emotion: { reasoning: "minimal" },
+      },
     });
+    assert.deepEqual(cfg.models.emotion, { reasoning: "minimal" });
     const llm = new OpenAIModels(cfg, { OPENAI_API_KEY: "fake" });
+    assert.equal(llm.model("emotion").baseUrl, model.baseUrl);
     assert.deepEqual(await llm.json("query", {}), { queries: ["test"] });
     assert.equal(await llm.summarize("old text", 1000), "summary");
+    const summaryBody = seen.at(-1).body;
+    assert.equal(
+      protocol === "responses"
+        ? summaryBody.max_output_tokens
+        : summaryBody.max_completion_tokens,
+      cfg.models.main.maxOutput,
+    );
+    assert.equal(
+      JSON.parse(
+        protocol === "responses"
+          ? summaryBody.input
+          : summaryBody.messages.at(-1).content,
+      ).conversation_to_summarize,
+      "old text",
+    );
+    assert.equal(
+      protocol === "responses"
+        ? summaryBody.text.format.type
+        : summaryBody.response_format.type,
+      "json_object",
+    );
     for (const request of seen.slice(-2)) {
       assert.equal(
         request.url,
@@ -2544,6 +2646,26 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
         assert.equal(request.body.previous_response_id, undefined);
       }
     }
+    const effort = (request: any) =>
+      protocol === "responses"
+        ? request.body.reasoning?.effort
+        : request.body.reasoning_effort;
+    assert.equal(effort(seen.at(-2)), "low");
+    assert.equal(effort(seen.at(-1)), "high");
+    await llm.json("emotion", {}, undefined, "emotion");
+    assert.equal(effort(seen.at(-1)), "minimal");
+    cfg.models.fast.reasoning = "off";
+    cfg.models.main.reasoning = "off";
+    await llm.json("query", {});
+    await llm.summarize("text", 1000);
+    assert.equal(effort(seen.at(-2)), undefined);
+    assert.equal(effort(seen.at(-1)), undefined);
+    invalidSummary = true;
+    await assert.rejects(
+      llm.summarize("user: continue the old conversation", 1000),
+      /Invalid history summary/,
+    );
+    invalidSummary = false;
     if (protocol === "responses") {
       incomplete = true;
       await assert.rejects(llm.json("query", {}), /Incomplete/);
@@ -2564,6 +2686,13 @@ test("context preserves dialogue roles, current trigger once last, and hides ope
     ...event("previous-assistant"),
     type: "agent_reply",
     text: "previous answer",
+    data: { delivery: { parts: [{ type: "text", text: "previous answer" }] } },
+  });
+  f.db.append({
+    ...event("previous-answer-sent"),
+    type: "delivery_result",
+    text: "sent",
+    data: { delivery_id: "previous-assistant", index: 0 },
   });
   f.db.append({
     ...event("previous-tool"),
@@ -2594,14 +2723,20 @@ test("context preserves dialogue roles, current trigger once last, and hides ope
     path.join(f.root, "prompts"),
     new History(f.db, cfg, llm),
     memory,
+    llm,
   ).build([current], "ordered-context", new AbortController().signal);
-  assert.match(String(context.messages[0].content), /Background reference/);
-  assert.match(String(context.messages[0].content), /happy cause/);
+  assert.match(
+    String(context.messages.at(-2)?.content),
+    /Background reference/,
+  );
+  assert.equal(context.messages.at(-2)?.role, "system");
+  assert.match(String(context.messages.at(-2)?.content), /你自己的感受/);
+  assert.match(String(context.messages.at(-2)?.content), /happy cause/);
   assert.doesNotMatch(
-    String(context.messages[0].content),
+    String(context.messages.at(-2)?.content),
     /activation|internal-only-id|focus_updated_at|last_response_id/,
   );
-  assert.match(String(context.messages[1].content), /older summary/);
+  assert.match(String(context.messages[0].content), /older summary/);
   assert.equal(
     context.messages.find((m) => String(m.content).includes("previous answer"))
       ?.role,
@@ -2622,7 +2757,7 @@ test("context preserves dialogue roles, current trigger once last, and hides ope
   assert.ok((await memory.state()).activation["internal-only-id"]);
 });
 
-test("empty query skips automatic recall; generated query replaces raw dialogue", async (t) => {
+test("query expansion preserves original input even when generated queries are empty", async (t) => {
   const f = await fixture(t),
     cfg = f.config.current;
   cfg.memory.query = true;
@@ -2658,10 +2793,10 @@ test("empty query skips automatic recall; generated query replaces raw dialogue"
     },
   );
   assert.deepEqual(await memory.recall("现在几点"), []);
-  assert.deepEqual(seen, []);
+  assert.deepEqual(seen, ["现在几点\n"]);
   queries = ["海边旅行"];
   await memory.recall("最新话题，附带很长的旧话题");
-  assert.deepEqual(seen, ["海边旅行"]);
+  assert.deepEqual(seen, ["最新话题，附带很长的旧话题\n海边旅行"]);
 });
 
 test("background vectorization reports partial failure, avoids duplicate work and retries missing items", async (t) => {
@@ -2719,4 +2854,1275 @@ test("background vectorization reports partial failure, avoids duplicate work an
   memory.startIndexing();
   await wait(() => !(memory as any).indexingTask);
   assert.equal(calls, 3);
+});
+
+test("model history removes log headers, merges response chunks and preserves boundaries", async (t) => {
+  const f = await fixture(t);
+  const history = new History(f.db, f.config.current, llm);
+  const first = f.db.append({
+    ...event("private-first"),
+    text: "你好",
+    occurred_at: "2026-11-02T01:00:00Z",
+  });
+  for (const [id, text] of [
+    ["chunk-1", "好的"],
+    ["chunk-2", "我来看看"],
+  ])
+    f.db.append({
+      ...event(id),
+      type: "agent_reply",
+      text,
+      run_id: "run-1",
+      data: { response_id: "response-1" },
+      occurred_at: "2026-11-02T01:01:00Z",
+    });
+  f.db.append({
+    ...event("tool-between"),
+    type: "tool_result",
+    text: "read result",
+    occurred_at: "2026-11-02T01:01:01Z",
+  });
+  f.db.append({
+    ...event("chunk-3"),
+    type: "agent_reply",
+    text: "看完了",
+    run_id: "run-1",
+    data: { response_id: "response-1" },
+    occurred_at: "2026-11-02T01:01:02Z",
+  });
+  const latest = f.db.append({
+    ...event("group-input"),
+    text: "明天继续",
+    reply_target: { channel: "telegram", conversation: "group", kind: "group" },
+    sender: { id: "person-1", name: "小明", kind: "user" },
+    reply_to_message_id: "42",
+    occurred_at: "2026-11-03T01:00:00Z",
+  });
+  const messages = history.messages("main", [latest]);
+  assert.equal(messages.length, 5);
+  assert.deepEqual(messages[1], {
+    role: "assistant",
+    content: "好的\n我来看看",
+  });
+  assert.equal(messages[3].content, "看完了");
+  assert.match(String(messages[4].content), /2026-11-03 09:00/);
+  assert.match(String(messages[4].content), /位置：telegram:group/);
+  assert.match(String(messages[4].content), /发言人：小明/);
+  assert.match(String(messages[4].content), /回复消息：42/);
+  const serialized = JSON.stringify(messages);
+  assert.doesNotMatch(
+    serialized,
+    /event=|platform_message=|source=|target=|private-first|response-1/,
+  );
+  assert.equal(serialized.split("明天继续").length - 1, 1);
+  assert.match(history.render(first), /event=private-first/);
+  assert.equal(f.db.all("main").length, 6);
+  const view = await history.view("main");
+  assert.doesNotMatch(view, /event=|platform_message=/);
+  assert.match(view, /assistant: 好的/);
+});
+
+test("auxiliary files reload per call, overrides win, emotion scales and unknown names are explicit", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  const { auxiliaryPrompt, parseAuxiliary } =
+    await import("../src/config/auxiliary.js");
+  const file = path.join(f.config.agentRoot("main"), "prompts/auxiliary.yaml");
+  assert.match(
+    await auxiliaryPrompt(f.config.agentRoot("main"), cfg, "emotion"),
+    /0–100/,
+  );
+  await fs.writeFile(file, "query: first\n");
+  assert.equal(
+    await auxiliaryPrompt(f.config.agentRoot("main"), cfg, "query"),
+    "first",
+  );
+  await fs.writeFile(file, "query: second\n");
+  assert.equal(
+    await auxiliaryPrompt(f.config.agentRoot("main"), cfg, "query"),
+    "second",
+  );
+  cfg.prompts.query = "override";
+  assert.equal(
+    await auxiliaryPrompt(f.config.agentRoot("main"), cfg, "query"),
+    "override",
+  );
+  assert.throws(() => parseAuxiliary("typo: nope"));
+  cfg.state.enabled = true;
+  cfg.state.eventSensitivity = 2;
+  cfg.state.moodDeltaLimit = 3;
+  cfg.state.dimensionDeltaLimit = 5;
+  let sent: any;
+  const memory = new MemoryService(
+    f.config.agentRoot("main"),
+    "main",
+    f.db,
+    cfg,
+    {
+      ...llm,
+      json: async (system, input) => {
+        sent = { system, input };
+        return {
+          mood: 4,
+          emotions: { 担忧: 4, 担心: 9 },
+          drives: { closeness: 2 },
+        };
+      },
+    },
+  );
+  await memory.afterRun(
+    "emotion-test",
+    { request: "做噩梦了", result: { text: "安慰" } },
+    [],
+  );
+  const state = await memory.state();
+  assert.match(sent.system, /不要自行乘/);
+  assert.deepEqual(sent.input.policy.emotionLabels, cfg.state.emotionLabels);
+  assert.ok(sent.input.policy.drives.closeness);
+  assert.equal(sent.input.state.activation, undefined);
+  assert.equal(sent.input.state.conversation_context, undefined);
+  assert.ok(state.assessed_at);
+  assert.ok(Math.abs(state.mood - (cfg.state.baseline + 3)) < 0.1);
+  assert.ok(Math.abs(state.emotions.担忧 - 5) < 0.1);
+  assert.equal(state.emotions.担心, undefined);
+  const log = f.db.db
+    .prepare(
+      "SELECT data FROM logs WHERE component='mood' ORDER BY seq DESC LIMIT 1",
+    )
+    .get() as any;
+  assert.match(JSON.stringify(log), /emotions.担心/);
+});
+
+test("one-time deadlines are absolute, disabled and past tasks skip, long waits rearm and cancellation stops", async () => {
+  const { OnceTasksSchema, armOnceTasks, onceEventId } =
+    await import("../src/once-tasks.js");
+  const task = {
+    id: "reminder",
+    enabled: true,
+    at: "2030-01-02T08:00:00+08:00",
+    text: "提醒",
+  };
+  assert.throws(() =>
+    OnceTasksSchema.parse({ tasks: [{ ...task, at: "2030-01-02T08:00:00" }] }),
+  );
+  assert.throws(() => OnceTasksSchema.parse({ tasks: [task, task] }));
+  assert.equal(
+    onceEventId("main", task),
+    onceEventId("main", { ...task, at: "2030-01-02T00:00:00Z" }),
+  );
+  assert.notEqual(onceEventId("main", task), onceEventId("other", task));
+  let now = Date.parse(task.at) - 3e9,
+    seq = 0;
+  const timers = new Map<number, { fn: () => void; ms: number }>(),
+    emitted: string[] = [];
+  const clock = {
+    now: () => now,
+    set: (fn: () => void, ms: number) => {
+      timers.set(++seq, { fn, ms });
+      return seq;
+    },
+    clear: (id: number) => {
+      timers.delete(id);
+    },
+  };
+  const stop = armOnceTasks(
+    [
+      task,
+      { ...task, id: "disabled", enabled: false },
+      { ...task, id: "past", at: "2020-01-01T00:00:00Z" },
+    ],
+    async (t) => {
+      emitted.push(t.id);
+    },
+    (e) => {
+      throw e;
+    },
+    clock,
+  );
+  assert.equal(timers.size, 1);
+  assert.equal(timers.get(1)!.ms, 2 ** 31 - 1);
+  {
+    const fn = timers.get(1)!.fn;
+    timers.delete(1);
+    fn();
+  }
+  assert.equal(emitted.length, 0);
+  assert.equal(seq, 2);
+  now = Date.parse(task.at);
+  {
+    const fn = timers.get(2)!.fn;
+    timers.delete(2);
+    fn();
+  }
+  await Promise.resolve();
+  assert.deepEqual(emitted, ["reminder"]);
+  stop();
+  assert.equal(timers.size, 0);
+  armOnceTasks(
+    [task],
+    async () => {
+      throw Error("must skip past deadline");
+    },
+    () => {},
+    clock,
+  );
+  assert.equal(timers.size, 0);
+});
+
+test("one-time scheduler posts normal events; invalid edits keep live schedule; restart skips past task", async (t) => {
+  const f = await fixture(t);
+  const accepted: any[] = [];
+  const listener = http.createServer(async (req, res) => {
+    let text = "";
+    for await (const c of req) text += c;
+    accepted.push({ url: req.url, body: JSON.parse(text) });
+    res.end("{}");
+  });
+  await new Promise<void>((resolve) =>
+    listener.listen(0, "127.0.0.1", resolve),
+  );
+  f.cleanup.push(
+    () => new Promise<void>((resolve) => listener.close(() => resolve())),
+  );
+  await fs.symlink(
+    path.resolve("node_modules"),
+    path.join(f.root, "node_modules"),
+    "dir",
+  );
+  const port = (listener.address() as any).port;
+  f.config.current.server.port = port;
+  f.config.current.scheduler.enabled = true;
+  await f.config.save(f.config.current);
+  await fs.writeFile(
+    path.join(f.config.agentRoot("main"), "schedule.ts"),
+    "setInterval(()=>{}, 1000);",
+  );
+  const file = path.join(f.config.agentRoot("main"), "schedule.once.json");
+  const task = {
+    id: "wake",
+    at: new Date(Date.now() + 1200).toISOString(),
+    text: "提醒",
+    enabled: true,
+  };
+  await fs.writeFile(file, JSON.stringify({ tasks: [task] }));
+  const scheduler = new Scheduler(f.config, f.db);
+  f.cleanup.push(() => scheduler.stop());
+  await scheduler.start();
+  await fs.writeFile(file, '{"tasks":[{"oops":1}]}');
+  await assert.rejects(scheduler.restart("main"));
+  assert.equal(scheduler.status().agents.main.running, true);
+  await wait(() => accepted.length === 1);
+  assert.equal(accepted[0].url, "/v1/events");
+  assert.equal(accepted[0].body.type, "internal_event");
+  assert.equal(accepted[0].body.agent_id, "main");
+  assert.equal(accepted[0].body.data.kind, "once");
+  await fs.writeFile(file, JSON.stringify({ tasks: [task] }));
+  await scheduler.restart("main");
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(accepted.length, 1);
+});
+
+test("existing installs gain auxiliary and once files without overwriting personal changes; admin validates both", async (t) => {
+  const f = await fixture(t),
+    root = f.config.agentRoot("main");
+  const { AdminFiles } = await import("../src/admin/files.js");
+  const { auxiliaryDefaults, parseAuxiliary } =
+    await import("../src/config/auxiliary.js");
+  assert.deepEqual(
+    parseAuxiliary(await fs.readFile("prompts/auxiliary.yaml", "utf8")),
+    auxiliaryDefaults,
+  );
+  await fs.unlink(path.join(root, "prompts/auxiliary.yaml"));
+  await fs.unlink(path.join(root, "schedule.once.json"));
+  await initialize(f.root);
+  assert.match(
+    await fs.readFile(path.join(root, "prompts/auxiliary.yaml"), "utf8"),
+    /stateExpression/,
+  );
+  assert.deepEqual(
+    JSON.parse(
+      await fs.readFile(path.join(root, "schedule.once.json"), "utf8"),
+    ),
+    { tasks: [] },
+  );
+  const files = new AdminFiles(f.config),
+    name = "agents/main/prompts/auxiliary.yaml";
+  let file = await files.read(name);
+  await assert.rejects(files.write(name, "emotion: []", file.version));
+  file = await files.write(name, "emotion: 自定义判断规则\n", file.version);
+  await initialize(f.root);
+  assert.equal((await files.read(name)).content, "emotion: 自定义判断规则\n");
+  const tasks = await files.read("agents/main/schedule.once.json");
+  await assert.rejects(
+    files.write(
+      tasks.path,
+      '{"tasks":[{"id":"bad","at":"no timezone","text":"x"}]}',
+      tasks.version,
+    ),
+  );
+  assert.deepEqual(JSON.parse((await files.read(tasks.path)).content), {
+    tasks: [],
+  });
+});
+
+test("natural state keeps numeric bookkeeping private and handles time/mood boundaries", async (t) => {
+  const { stateContext, gapContext } =
+    await import("../src/layer3/state-context.js");
+  const { localMoment } = await import("../src/shared/time-context.js");
+  const cfg = (await fixture(t)).config.current;
+  cfg.state.enabled = true;
+  cfg.scheduler.timezone = "Asia/Shanghai";
+  const now = Date.parse("2026-11-03T02:34:00Z");
+  const state = {
+    updated_at: new Date(now).toISOString(),
+    assessed_at: "2026-11-03T02:03:00Z",
+    mood: 80,
+    emotions: { 愉快: 3, 担忧: 72, 安心: 45, 旧名字: 100 },
+    drives: {
+      closeness: cfg.drives.closeness.baseline + 10,
+      curiosity: cfg.drives.curiosity.baseline,
+    },
+    cause: "之前工作遇到阻碍",
+    thoughts: [],
+    focus: [],
+    activation: { "private-id": now },
+    conversation_context: { seconds_since_last_response: 1847 },
+  };
+  const prompt = stateContext(state, cfg, now);
+  assert.match(prompt, /上午/);
+  assert.match(prompt, /约 30 分钟/);
+  assert.match(prompt, /不必重复上一段收尾/);
+  assert.match(prompt, /明朗/);
+  assert.match(prompt, /担忧非常明显，安心比较明显/);
+  assert.match(prompt, /想亲近对方比平常更强/);
+  assert.match(prompt, /早些时候.*10:03/);
+  assert.doesNotMatch(
+    prompt,
+    /private-id|activation|80 \/ 100|旧名字|愉快|好奇比/,
+  );
+  for (const [n, text] of [
+    [59, "刚刚"],
+    [60, "约 1 分钟"],
+    [899, "接着当前话题"],
+    [900, "停了一会儿"],
+    [7199, "停了一会儿"],
+    [7200, "已有一段间隔"],
+    [86400, "约 1 天"],
+  ] as const)
+    assert.ok(gapContext(n).includes(text));
+  assert.match(gapContext(NaN), /没有/);
+  assert.match(localMoment(now, "UTC"), /凌晨/);
+  cfg.state.enabled = false;
+  assert.doesNotMatch(stateContext(state, cfg, now), /心情底色|担忧|感受缘由/);
+  cfg.state.gap = false;
+  assert.doesNotMatch(stateContext(state, cfg, now), /距离上次/);
+});
+
+test("internal greetings carry their own time, preserve historical identity and use normal messages", async (t) => {
+  const f = await fixture(t);
+  f.config.current.scheduler.timezone = "Asia/Shanghai";
+  const h = new History(f.db, f.config.current, llm);
+  const e = f.db.append({
+    ...event("natural-greeting"),
+    type: "internal_event",
+    source: "scheduler",
+    occurred_at: "2026-11-03T02:34:00Z",
+    text: "想找对方聊两句",
+    data: { kind: "random_chat" },
+  });
+  const text = h.modelText(e);
+  assert.match(text, /10:34.*上午/);
+  assert.match(text, /不是要回复的消息/);
+  const messages = h.messages("main", [e]);
+  assert.equal(messages.at(-1)?.role, "user");
+  assert.match(String(messages.at(-1)?.content), /想找对方聊两句/);
+  assert.match(
+    h.modelText({ ...e, data: { kind: "memory_review" } }),
+    /内部事件/,
+  );
+  assert.doesNotMatch(
+    h.modelText({ ...e, data: { kind: "memory_review" } }),
+    /主动联系的契机/,
+  );
+});
+
+test("prompt mapping validates bands, merges fields, reloads per agent and preserves defaults", async (t) => {
+  const f = await fixture(t),
+    root = f.config.agentRoot("main");
+  const { parsePromptMapping, loadPromptMapping, promptMappingDefaults } =
+    await import("../src/config/prompt-mapping.js");
+  const { AdminFiles } = await import("../src/admin/files.js");
+  const files = new AdminFiles(f.config),
+    name = "agents/main/prompts/prompt-mapping.yaml";
+  assert.deepEqual(
+    parsePromptMapping(
+      await fs.readFile("prompts/prompt-mapping.yaml", "utf8"),
+    ),
+    promptMappingDefaults,
+  );
+  assert.deepEqual(await loadPromptMapping(root), promptMappingDefaults);
+  const rootTemplate = await files.read("prompts/prompt-mapping.yaml");
+  await assert.rejects(
+    files.write(rootTemplate.path, "gap: {bands: []}", rootTemplate.version),
+  );
+
+  for (const bad of [
+    "typo: true",
+    "gap: {bands: [{min: 10, text: x}]}",
+    "mood: {bands: [{min: 0, text: x}, {min: 0, text: y}]}",
+    "emotions: {maxItems: -1}",
+    'text: {now: "{unknown}"}',
+    "[]",
+  ])
+    assert.throws(() => parsePromptMapping(bad));
+  let original = await files.read(name);
+  await assert.rejects(files.write(name, "gap: {bands: []}", original.version));
+  assert.equal((await files.read(name)).content, original.content);
+  await files.write(
+    name,
+    'emotions: {maxItems: 0}\nmood: {template: "此刻：{label}"}\n',
+    original.version,
+  );
+  assert.equal((await loadPromptMapping(root)).emotions.maxItems, 0);
+  assert.equal((await loadPromptMapping(root)).mood.template, "此刻：{label}");
+  assert.deepEqual(
+    (await loadPromptMapping(root)).mood.bands,
+    promptMappingDefaults.mood.bands,
+  );
+  await initialize(f.root);
+  assert.equal((await loadPromptMapping(root)).emotions.maxItems, 0);
+  assert.deepEqual(
+    await loadPromptMapping(path.join(f.root, "missing-agent")),
+    promptMappingDefaults,
+  );
+  await fs.unlink(path.join(root, "prompts/prompt-mapping.yaml"));
+  await initialize(f.root);
+  assert.deepEqual(await loadPromptMapping(root), promptMappingDefaults);
+});
+
+test("context reads edited mapping on next build without restart or mutating scores", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current,
+    root = f.config.agentRoot("main");
+  cfg.state.enabled = true;
+  const memory = new MemoryService(root, "main", f.db, cfg, llm);
+  await memory.updateState((s) => {
+    s.mood = cfg.state.baseline;
+    s.emotions = { 担忧: 80 };
+  });
+  const builder = new ContextBuilder(
+    f.db,
+    cfg,
+    cfg.agents[0],
+    root,
+    path.join(root, "prompts"),
+    new History(f.db, cfg, llm),
+    memory,
+    llm,
+  );
+  const e = f.db.append(event("mapping-context"));
+  const initial = await builder.build(
+    [e],
+    "map-before",
+    new AbortController().signal,
+  );
+  assert.match(String(initial.messages[0].content), /担忧非常明显/);
+  await fs.writeFile(
+    path.join(root, "prompts/prompt-mapping.yaml"),
+    'emotions: {maxItems: 0}\nmood: {template: "独立映射：{label}"}\n',
+  );
+  const next = await builder.build(
+    [e],
+    "map-after",
+    new AbortController().signal,
+  );
+  assert.match(String(next.messages[0].content), /独立映射/);
+  assert.doesNotMatch(String(next.messages[0].content), /担忧非常明显/);
+  assert.ok((await memory.state()).emotions.担忧 > 79);
+  await fs.writeFile(
+    path.join(root, "prompts/prompt-mapping.yaml"),
+    "mood: {bands: []}",
+  );
+  await assert.rejects(
+    builder.build([e], "map-invalid", new AbortController().signal),
+    /Invalid prompts\/prompt-mapping.yaml/,
+  );
+});
+
+test("dynamic background stays after stable history, before the whole fresh batch, including compaction", async (t) => {
+  const f = await fixture(t),
+    history = new History(f.db, f.config.current, llm);
+  const old = f.db.append({ ...event("stable-old"), text: "old input" });
+  f.db.append({
+    ...event("stable-reply"),
+    type: "agent_reply",
+    text: "old reply",
+  });
+  const first = f.db.append({ ...event("batch-first"), text: "fresh one" });
+  const second = f.db.append({ ...event("batch-second"), text: "fresh two" });
+  const bg = { role: "user" as const, content: "dynamic state A" };
+  const before = history.messages("main", [first, second], bg);
+  const after = history.messages("main", [first, second], {
+    ...bg,
+    content: "dynamic state B",
+  });
+  assert.deepEqual(before.slice(0, -3), after.slice(0, -3));
+  assert.equal(before.at(-3)?.content, bg.content);
+  assert.match(String(before.at(-2)?.content), /fresh one/);
+  assert.match(String(before.at(-1)?.content), /fresh two/);
+  assert.equal(JSON.stringify(before).split("fresh one").length - 1, 1);
+  f.db.set("history:main", { through: old.seq, summary: "old summary" });
+  const compacted = history.messages("main", [first, second], bg);
+  assert.match(String(compacted[0].content), /old summary/);
+  assert.equal(compacted.at(-3)?.content, bg.content);
+  assert.equal(history.messages("main", [], bg).at(-1)?.content, bg.content);
+});
+
+test("autonomous history keeps routing metadata out of assistant speech and preserves raw records", async (t) => {
+  const f = await fixture(t);
+  const history = new History(f.db, f.config.current, llm);
+  const target = {
+    channel: "telegram",
+    conversation: "test-owner",
+    kind: "private" as const,
+  };
+  f.db.append({
+    ...event("route-user"),
+    reply_target: target,
+    text: "hello",
+    occurred_at: "2026-11-03T01:00:00Z",
+  });
+  f.db.append({
+    ...event("route-timer"),
+    type: "internal_event",
+    reply_target: undefined,
+    text: "new opportunity",
+    data: { kind: "random_chat" },
+    occurred_at: "2026-11-03T01:10:00Z",
+  });
+  const original = f.db.append({
+    ...event("route-reply"),
+    type: "agent_reply",
+    reply_target: target,
+    text: "[位置：telegram:test-owner]\nnew thought",
+    occurred_at: "2026-11-03T01:11:00Z",
+  });
+  f.db.append({
+    ...event("route-other"),
+    type: "agent_reply",
+    reply_target: { ...target, conversation: "another" },
+    text: "other place",
+    occurred_at: "2026-11-03T03:11:00Z",
+  });
+  const messages = history.messages("main", []);
+  assert.deepEqual(
+    messages.filter((m) => m.role === "assistant").map((m) => m.content),
+    ["new thought", "other place"],
+  );
+  assert.equal(
+    messages.filter((m) =>
+      String(m.content).includes("位置：telegram:test-owner"),
+    ).length,
+    1,
+  );
+  assert.ok(
+    messages.some(
+      (m) =>
+        m.role === "user" &&
+        String(m.content).includes("位置：telegram:another"),
+    ),
+  );
+  assert.equal(
+    f.db.all("main").find((e) => e.event_id === original.event_id)?.text,
+    original.text,
+  );
+  const ordinary = {
+    ...original,
+    text: "我看到文件里的 [位置：telegram:test-owner]，这是内容。",
+  };
+  assert.equal(history.modelText(ordinary), ordinary.text);
+});
+
+test("recall query identifies only real incoming messages as previous user inputs", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current,
+    root = f.config.agentRoot("main");
+  f.db.append({ ...event("real-user"), text: "user fact" });
+  f.db.append({
+    ...event("old-timer"),
+    type: "internal_event",
+    text: "old internal idea",
+  });
+  const current = f.db.append({
+    ...event("new-timer"),
+    type: "internal_event",
+    text: "new internal idea",
+  });
+  const memory = new MemoryService(root, "main", f.db, cfg, llm);
+  let query = "";
+  memory.recall = async (text) => {
+    query = text;
+    return [];
+  };
+  await new ContextBuilder(
+    f.db,
+    cfg,
+    cfg.agents[0],
+    root,
+    path.join(root, "prompts"),
+    new History(f.db, cfg, llm),
+    memory,
+    llm,
+  ).build([current], "query-provenance", new AbortController().signal);
+  assert.match(query, /user fact/);
+  assert.match(query, /new internal idea/);
+  assert.doesNotMatch(query, /old internal idea/);
+});
+
+test("DeepSeek transport preserves system identity without changing other providers or overrides", () => {
+  assert.deepEqual(
+    modelCompat({
+      baseUrl: "https://api.deepseek.com/v1",
+      compat: { supportsStrictMode: false },
+    }),
+    {
+      supportsDeveloperRole: false,
+      supportsMidConvoSystemMessages: true,
+      supportsStrictMode: false,
+    },
+  );
+  assert.deepEqual(modelCompat({ baseUrl: "https://api.openai.com/v1" }), {});
+  assert.deepEqual(
+    modelCompat({ baseUrl: "https://api.deepseek.com.example.org" }),
+    {},
+  );
+  assert.deepEqual(
+    modelCompat({ baseUrl: "https://example.org/deepseek" }),
+    {},
+  );
+  assert.deepEqual(
+    modelCompat({
+      baseUrl: "https://api.deepseek.com",
+      compat: { supportsDeveloperRole: true },
+    }),
+    { supportsDeveloperRole: true, supportsMidConvoSystemMessages: true },
+  );
+});
+
+test("unanswered human inputs move after background until an actual text delivery", async (t) => {
+  const f = await fixture(t),
+    h = new History(f.db, f.config.current, llm);
+  const a = f.db.append({ ...event("u-a"), text: "first human input" });
+  f.db.append({
+    ...event("tool-between"),
+    type: "tool_result",
+    text: "tool only",
+  });
+  const b = f.db.append({ ...event("u-b"), text: "second human input" });
+  assert.deepEqual(
+    h.unansweredBatch("main", [b]).map((e) => e.event_id),
+    [a.event_id, b.event_id],
+  );
+  const pending = f.db.append({
+    ...event("pending-text"),
+    type: "agent_reply",
+    text: "not yet delivered",
+    data: { delivery: { parts: [{ type: "text", text: "reply" }] } },
+  });
+  const c = f.db.append({ ...event("u-c"), text: "third human input" });
+  assert.equal(h.unansweredBatch("main", [c]).length, 3);
+  f.db.append({
+    ...event("reaction"),
+    type: "outbound_action",
+    data: { delivery: { parts: [], action: "react" } },
+  });
+  f.db.append({
+    ...event("reaction-success"),
+    type: "delivery_result",
+    text: "sent",
+    data: { delivery_id: "reaction", index: 0 },
+  });
+  const d = f.db.append({ ...event("u-d"), text: "fourth human input" });
+  assert.equal(h.unansweredBatch("main", [d]).length, 4);
+  f.db.append({
+    ...event("text-success"),
+    type: "delivery_result",
+    text: "sent",
+    data: { delivery_id: pending.event_id, index: 0 },
+  });
+  const e = f.db.append({ ...event("u-e"), text: "fifth human input" });
+  assert.deepEqual(
+    h.unansweredBatch("main", [e]).map((x) => x.event_id),
+    [e.event_id],
+  );
+  const f1 = f.db.append({ ...event("u-f"), text: "sixth human input" });
+  const batch = h.unansweredBatch("main", [f1]);
+  const bg = { role: "system" as const, content: "memory and feelings" };
+  const messages = h.messages("main", batch, bg);
+  const index = messages.findIndex((m) => m.content === bg.content);
+  assert.match(String(messages[index + 1].content), /fifth human input/);
+  assert.match(String(messages[index + 2].content), /sixth human input/);
+  assert.equal(
+    JSON.stringify(messages).split("fifth human input").length - 1,
+    1,
+  );
+  const timer = f.db.append({ ...event("timer-only"), type: "internal_event" });
+  assert.deepEqual(h.unansweredBatch("main", [timer]), [timer]);
+});
+
+test("compaction checkpoint cannot skip an excluded unanswered input", async (t) => {
+  const f = await fixture(t);
+  const cfg = parseConfig({
+    ...f.config.current,
+    history: {
+      ...f.config.current.history,
+      triggerTokens: 1500,
+      targetTokens: 800,
+      summaryTokens: 100,
+    },
+  });
+  for (let i = 0; i < 10; i++)
+    f.db.append({
+      ...event("old-prefix-" + i),
+      text: "older information ".repeat(300),
+    });
+  const input = f.db.append({
+    ...event("protected-unanswered"),
+    text: "please remember my complete request",
+  });
+  for (let i = 0; i < 10; i++)
+    f.db.append({
+      ...event("later-tool-" + i),
+      type: "tool_result",
+      text: "large tool result ".repeat(150),
+    });
+  const h = new History(f.db, cfg, llm);
+  await h.view("main", undefined, undefined, new Set([input.event_id]));
+  assert.ok(f.db.get("history:main", { through: 0 }).through < input.seq);
+  const replay = h.messages("main", [input], {
+    role: "system",
+    content: "background",
+  });
+  assert.equal(JSON.stringify(replay).split(input.text).length - 1, 1);
+  assert.equal(f.db.getEvent("main", input.event_id)?.text, input.text);
+});
+
+test("execution/context bulk cleanup and age-based logs remain independent and agent scoped", async (t) => {
+  const f = await fixture(t);
+  process.env.HINENI_TOKEN = "test-token-long-enough-for-authentication";
+  const runtime = new Runtime(f.config, f.db, async () => {}, llm);
+  const server = await servers(
+    f.config,
+    runtime,
+    new Scheduler(f.config, f.db),
+  );
+  f.cleanup.push(() => server.close());
+  const headers = { authorization: "Bearer " + process.env.HINENI_TOKEN };
+  const root = f.config.agentRoot("main");
+  for (const id of ["cleanup-one", "cleanup-two"]) {
+    f.db.claim("main", [], id);
+    f.db.finish(id, "complete");
+    f.db.append({ ...event("chat-" + id), run_id: id, text: "retained chat" });
+    const tool = path.join(root, "history/tools", id, "result.json");
+    await fs.mkdir(path.dirname(tool), { recursive: true });
+    await fs.writeFile(tool, "tool secret");
+    await fs.writeFile(tool.replace(/\.json$/, ".stdout"), "terminal bytes");
+    f.db.append({
+      ...event("call-" + id),
+      run_id: id,
+      type: "tool_call",
+      text: "tool input",
+    });
+    f.db.append({
+      ...event("result-" + id),
+      run_id: id,
+      type: "tool_result",
+      text: "tool output",
+      data: { result_file: tool },
+    });
+    f.db.append({
+      ...event("finished-" + id),
+      run_id: id,
+      type: "run_finished",
+      text: JSON.stringify({ text: "retained chat" }),
+    });
+    for (const file of [
+      `.runtime/requests/${id}/0.json`,
+      `.runtime/traces/${id}.json`,
+    ]) {
+      const p = path.join(root, file);
+      await fs.mkdir(path.dirname(p), { recursive: true });
+      await fs.writeFile(p, "{}");
+    }
+  }
+  f.db.claim("other", [], "other-run");
+  f.db.finish("other-run", "complete");
+  f.db.set("history:main", { through: 0, summary: "retained summary" });
+  const remove = (scope: string, payload: any) =>
+    server.api.inject({
+      method: "DELETE",
+      url: `/v1/agents/main/${scope}-records`,
+      headers,
+      payload,
+    });
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url: "/v1/agents/main/execution-records",
+        payload: { mode: "all" },
+      })
+    ).statusCode,
+    401,
+  );
+  assert.equal(
+    (await remove("execution", { mode: "selected", run_ids: ["../outside"] }))
+      .statusCode,
+    400,
+  );
+  assert.equal(
+    (await remove("execution", { mode: "selected", run_ids: ["other-run"] }))
+      .statusCode,
+    404,
+  );
+  (runtime as any).active.set("main", {
+    runId: "active",
+    controller: new AbortController(),
+    promise: Promise.resolve(),
+  });
+  assert.equal((await remove("context", { mode: "all" })).statusCode, 409);
+  (runtime as any).active.delete("main");
+  let result = await remove("execution", {
+    mode: "selected",
+    run_ids: ["cleanup-one"],
+  });
+  assert.equal(result.statusCode, 200, result.body);
+  await assert.rejects(fs.stat(path.join(root, "history/tools/cleanup-one")));
+  assert.ok(
+    await fs.stat(path.join(root, ".runtime/requests/cleanup-one/0.json")),
+  );
+  const read = await server.api.inject({
+    url: "/v1/agents/main/runs/cleanup-one/context",
+    headers,
+  });
+  assert.equal(read.statusCode, 200, read.body);
+  const catalog = (
+    await server.api.inject({
+      url: "/v1/runs?agent=main&scope=context",
+      headers,
+    })
+  ).json();
+  assert.ok(catalog.some((r: any) => r.id === "cleanup-one"));
+  assert.equal((await remove("execution", { mode: "all" })).statusCode, 200);
+  assert.equal(
+    (await remove("context", { mode: "selected", run_ids: ["cleanup-one"] }))
+      .statusCode,
+    200,
+  );
+  assert.ok(
+    await fs.stat(path.join(root, ".runtime/requests/cleanup-two/0.json")),
+  );
+  assert.equal((await remove("context", { mode: "all" })).statusCode, 200);
+  assert.equal(
+    (
+      await server.api.inject({
+        url: "/v1/runs?agent=main&scope=context",
+        headers,
+      })
+    ).json().length,
+    0,
+  );
+  assert.ok(
+    f.db.db.prepare("SELECT id FROM runs WHERE agent_id='other'").get(),
+  );
+  assert.equal(
+    f.db.all("main").filter((e) => e.type === "incoming_message").length,
+    2,
+  );
+  assert.equal(
+    f.db.get("history:main", { summary: "" }).summary,
+    "retained summary",
+  );
+  f.db.db
+    .prepare(
+      "INSERT INTO logs(at,level,component,message,data) VALUES(?,?,?,?,?)",
+    )
+    .run("2020-01-01T00:00:00.000Z", "info", "test", "old", "{}");
+  f.db.db
+    .prepare(
+      "INSERT INTO logs(at,level,component,message,data) VALUES(?,?,?,?,?)",
+    )
+    .run("2099-01-01T00:00:00.000Z", "info", "test", "new", "{}");
+  result = await server.api.inject({
+    method: "DELETE",
+    url: "/v1/logs",
+    headers,
+    payload: { mode: "before", before: "2026-01-01T00:00:00Z" },
+  });
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(
+    f.db.logs(100).some((r: any) => r.message === "old"),
+    false,
+  );
+  assert.equal(
+    f.db.logs(100).some((r: any) => r.message === "new"),
+    true,
+  );
+  assert.equal(
+    (await server.api.inject({ url: "/v1/logs/storage", headers })).json()
+      .table,
+    "logs",
+  );
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "DELETE",
+        url: "/v1/logs",
+        headers,
+        payload: { mode: "all" },
+      })
+    ).statusCode,
+    200,
+  );
+  assert.equal(f.db.logs(100).length, 0);
+});
+
+test("turn spark only sees persona/current batch, preserves full history, and never becomes state", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.context.spark = true;
+  const old = f.db.append({
+    ...event("spark-old"),
+    text: "old conversation remains available",
+  });
+  const previousReply = f.db.append({
+    ...event("spark-old-reply"),
+    type: "agent_reply",
+    text: "previous response",
+    run_id: "spark-old-run",
+    data: {
+      delivery: { parts: [{ type: "text", text: "previous response" }] },
+    },
+  });
+  f.db.append({
+    ...event("spark-old-sent"),
+    type: "delivery_result",
+    text: "sent",
+    run_id: "spark-old-run",
+    data: { delivery_id: previousReply.event_id, index: 0 },
+  });
+  const current = f.db.append({
+    ...event("spark-new"),
+    text: "new playful input",
+  });
+  let seen: any, purpose: unknown;
+  const model = {
+    ...llm,
+    json: async (
+      _s: string,
+      input: unknown,
+      _signal?: AbortSignal,
+      p?: string,
+    ) => {
+      seen = input;
+      purpose = p;
+      return { spark: "a small imagined paper ship" };
+    },
+  };
+  const ar = f.config.agentRoot("main");
+  const memory = new MemoryService(ar, "main", f.db, cfg, model);
+  const context = await new ContextBuilder(
+    f.db,
+    cfg,
+    cfg.agents[0],
+    ar,
+    path.join(ar, "prompts"),
+    new History(f.db, cfg, model),
+    memory,
+    model,
+  ).build([current], "spark-context", new AbortController().signal);
+  assert.equal(purpose, "spark");
+  assert.equal(seen.current_input, "new playful input");
+  assert.doesNotMatch(
+    JSON.stringify(seen),
+    /old conversation|Current state|当前时间/,
+  );
+  assert.match(
+    JSON.stringify(context.messages),
+    /old conversation remains available/,
+  );
+  assert.match(JSON.stringify(context.messages), /a small imagined paper ship/);
+  assert.match(
+    String(context.messages.at(-2)?.content),
+    /不是记忆、用户请求、现实经历或已执行的行为/,
+  );
+  assert.match(String(context.messages.at(-1)?.content), /new playful input/);
+  assert.ok(old.seq < current.seq);
+  assert.doesNotMatch(
+    await fs.readFile(path.join(ar, "state.json"), "utf8"),
+    /paper ship/,
+  );
+  assert.doesNotMatch(
+    await fs.readFile(path.join(ar, "memory.json"), "utf8"),
+    /paper ship/,
+  );
+});
+
+test("turn spark disabled/empty/invalid/error paths remain optional", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current,
+    ar = f.config.agentRoot("main");
+  const current = f.db.append(event("spark-paths"));
+  let calls = 0,
+    issues = 0,
+    value: unknown = { spark: "" },
+    fail = false;
+  const model = {
+    ...llm,
+    json: async () => {
+      calls++;
+      if (fail) throw Error("offline");
+      return value;
+    },
+  };
+  const opts = {
+    root: ar,
+    cfg,
+    llm: model,
+    persona: "role",
+    batch: [current],
+    signal: new AbortController().signal,
+    onIssue: () => {
+      issues++;
+    },
+  };
+  assert.equal(await createTurnSpark(opts), "");
+  assert.equal(calls, 0);
+  cfg.context.spark = true;
+  assert.equal(
+    await createTurnSpark({ ...opts, batch: [{ ...current, text: "" }] }),
+    "",
+  );
+  assert.equal(calls, 0);
+  assert.equal(await createTurnSpark(opts), "");
+  assert.equal(sparkContext(""), "");
+  value = { spark: ["not a string"] };
+  assert.equal(await createTurnSpark(opts), "");
+  fail = true;
+  assert.equal(await createTurnSpark(opts), "");
+  assert.equal(issues, 2);
+});
+
+test("turn spark timeout falls back but caller cancellation propagates", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.context.spark = true;
+  cfg.context.sparkTimeoutMs = 20;
+  const model = {
+    ...llm,
+    json: async (_s: string, _i: unknown, signal?: AbortSignal) =>
+      new Promise((_resolve, reject) => {
+        const hold = setTimeout(
+          () => reject(Error("test should have cancelled")),
+          500,
+        );
+        signal!.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(hold);
+            reject(signal!.reason);
+          },
+          { once: true },
+        );
+      }),
+  };
+  const opts = {
+    root: f.config.agentRoot("main"),
+    cfg,
+    llm: model,
+    persona: "role",
+    batch: [f.db.append(event("spark-cancel"))],
+    signal: new AbortController().signal,
+  };
+  assert.equal(await createTurnSpark(opts), "");
+  cfg.context.sparkTimeoutMs = 1000;
+  const control = new AbortController();
+  setTimeout(() => control.abort(Error("new user input")), 10);
+  await assert.rejects(
+    createTurnSpark({ ...opts, signal: control.signal }),
+    /new user input/,
+  );
+});
+
+test("turn spark budgets and model inheritance stay independent from retrieval", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.context.spark = true;
+  cfg.context.sparkInputTokens = 400;
+  cfg.context.sparkTokens = 20;
+  cfg.models.fast.name = "fast-source";
+  cfg.models.spark = { maxOutput: 700 };
+  const modelConfig = new OpenAIModels(cfg, {}).model("spark");
+  assert.equal(modelConfig.name, "fast-source");
+  assert.equal(modelConfig.maxOutput, 700);
+  assert.equal(cfg.models.query, undefined);
+  let seen: any;
+  const model = {
+    ...llm,
+    json: async (_s: string, input: unknown) => {
+      seen = input;
+      return { spark: "imagined detail ".repeat(200) };
+    },
+  };
+  const spark = await createTurnSpark({
+    root: f.config.agentRoot("main"),
+    cfg,
+    llm: model,
+    persona: "role identity ".repeat(2000),
+    batch: [
+      f.db.append({
+        ...event("spark-budget"),
+        text: "old text ".repeat(500) + "latest input",
+      }),
+    ],
+    signal: new AbortController().signal,
+  });
+  assert.ok(seen.current_input.endsWith("latest input"));
+  assert.ok(tokens(JSON.stringify(seen)) <= cfg.context.sparkInputTokens);
+  assert.ok(tokens(spark) <= cfg.context.sparkTokens);
+});
+
+test("runtime injects a disposable spark without creating recursive trigger events", async (t) => {
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.context.spark = true;
+  let sparkCalls = 0,
+    seen: any;
+  const model = {
+    ...llm,
+    json: async (...args: Parameters<typeof llm.json>) => {
+      if ((args as any[])[3] === "spark") {
+        sparkCalls++;
+        return { spark: "runtime-only imagined seed" };
+      }
+      return llm.json(...args);
+    },
+  };
+  const rt = new Runtime(
+    f.config,
+    f.db,
+    async () => {},
+    model,
+    () => ({
+      run: async (request) => {
+        seen = request.context;
+        return complete("done");
+      },
+    }),
+  );
+  f.cleanup.push(() => rt.stop());
+  await rt.start();
+  rt.ingress({ ...event("spark-runtime-input"), text: "let us play" });
+  await rt.tick();
+  await wait(() => !!seen && rt.status().active.length === 0);
+  assert.equal(sparkCalls, 1);
+  assert.match(JSON.stringify(seen.messages), /runtime-only imagined seed/);
+  assert.equal(
+    f.db.all("main").filter((e) => e.type === "incoming_message").length,
+    1,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(f.db.all("main")),
+    /runtime-only imagined seed/,
+  );
+});
+
+test("context probabilities use exact boundaries and skip spark API calls", async (t) => {
+  const { chance } = await import("../src/shared/probability.js");
+  let draws = 0;
+  const random = () => {
+    draws++;
+    return 0.55;
+  };
+  assert.equal(chance(0, random), false);
+  assert.equal(chance(1, random), true);
+  assert.equal(draws, 0);
+  assert.equal(
+    chance(0.55, () => 0.549),
+    true,
+  );
+  assert.equal(chance(0.55, random), false);
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.context.spark = true;
+  cfg.context.sparkProbability = 0.55;
+  let calls = 0;
+  const opts = {
+    root: f.config.agentRoot("main"),
+    cfg,
+    persona: "role",
+    batch: [f.db.append(event("prob-spark"))],
+    llm: {
+      ...llm,
+      json: async () => {
+        calls++;
+        return { spark: "imagined" };
+      },
+    },
+    signal: new AbortController().signal,
+  };
+  assert.equal(await createTurnSpark({ ...opts, random: () => 0.55 }), "");
+  assert.equal(calls, 0);
+  assert.equal(
+    await createTurnSpark({ ...opts, random: () => 0.54 }),
+    "imagined",
+  );
+  assert.equal(calls, 1);
+  assert.throws(() => parseConfig({ context: { sparkProbability: 55 } }));
+});
+
+test("thought/focus draws only affect rendering and respect zero counts", async (t) => {
+  const { selectStateContext } = await import("../src/layer3/state-context.js");
+  const f = await fixture(t),
+    cfg = f.config.current;
+  cfg.state.enabled = true;
+  cfg.state.thoughtContextItems = 1;
+  cfg.state.focusMax = 1;
+  cfg.state.thoughtContextProbability = 0.15;
+  cfg.state.focusContextProbability = 0.2;
+  const ar = f.config.agentRoot("main"),
+    memory = new MemoryService(ar, "main", f.db, cfg, llm);
+  const state = await memory.state();
+  state.thoughts = [{ text: "saved thought", at: new Date().toISOString() }];
+  state.focus = ["saved focus"];
+  const before = JSON.stringify(state);
+  const a = selectStateContext(state, cfg, () => 0.1);
+  assert.deepEqual(a, { thoughts: true, focus: true });
+  const b = selectStateContext(state, cfg, () => 0.18);
+  assert.deepEqual(b, { thoughts: false, focus: true });
+  const c = selectStateContext(state, cfg, () => 0.9);
+  assert.deepEqual(c, { thoughts: false, focus: false });
+  assert.match(
+    stateContext(state, cfg, Date.now(), undefined, a),
+    /saved thought/,
+  );
+  assert.doesNotMatch(
+    stateContext(state, cfg, Date.now(), undefined, c),
+    /saved thought|saved focus/,
+  );
+  assert.equal(JSON.stringify(state), before);
+  cfg.state.thoughtContextItems = 0;
+  cfg.state.focusMax = 0;
+  assert.deepEqual(
+    selectStateContext(state, cfg, () => 0),
+    { thoughts: false, focus: false },
+  );
+});
+
+test("spark wrapping is configurable and legacy mapping files inherit it", () => {
+  const mapping = parsePromptMapping("text:\n  spark: '偶然想到：{text}'\n");
+  assert.match(sparkContext("a new idea", mapping), /偶然想到：a new idea/);
+  assert.match(sparkContext("a new idea", mapping), /不是记忆、用户请求/);
+  assert.ok(parsePromptMapping("{}").text.spark.includes("{text}"));
+  assert.throws(() => parsePromptMapping("text:\n  spark: '{invalid}'\n"));
 });

@@ -46,6 +46,11 @@ context:
   stateTokens: 1000
   safetyTokens: 16384
   trace: true
+  spark: false
+  sparkProbability: 1
+  sparkInputTokens: 4000
+  sparkTokens: 120
+  sparkTimeoutMs: 6000
 memory:
   enabled: true
   queryRecentMessages: 8
@@ -120,6 +125,8 @@ state:
   repeatedStimulusMultiplier: 0.5
   reportChars: 120
   thoughtContextItems: 1
+  thoughtContextProbability: 1
+  focusContextProbability: 1
   thoughtContextTokens: 300
   thoughtHalfLifeHours: 6
   focusMax: 2

@@ -16,4 +16,5 @@ export const style = String.raw`
 .history-select-row>input{margin:16px 0 0;flex:none}
 .history-select-row>.event{flex:1;min-width:0}
 .history-delete-actions{margin:0 0 12px}
+.once-task-form label{display:grid;gap:6px}.once-task-form input,.once-task-form textarea{width:100%}
 `;

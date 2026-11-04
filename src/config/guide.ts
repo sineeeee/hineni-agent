@@ -8,7 +8,7 @@ export const configurationGuide: Record<
     scope: "全局；保存配置并重启服务。",
   },
   model: {
-    flow: "主模型负责聊天、工具循环和历史压缩；fast 是四类辅助 JSON 调用的默认模型；embedding 只产生记忆向量。模型列表由接口地址和对应 key 获取，不代表列表中所有模型都支持当前任务。",
+    flow: "主模型负责聊天、工具循环和历史压缩；fast 是五类辅助 JSON 调用的默认模型；embedding 只产生记忆向量。模型列表由接口地址和对应 key 获取，不代表列表中所有模型都支持当前任务。",
     scope: "全局默认，可在 agent 的 main 或 models 覆盖；保存并重启。",
   },
   history: {
@@ -16,7 +16,7 @@ export const configurationGuide: Record<
     scope: "历史预算和 pollMs 均按当前 agent 生效。保存并重启。",
   },
   context: {
-    flow: "第三层拼入 system、人格、Skills 目录、记忆和当前状态，再加第二层历史。自身预算先裁剪；逼近模型实际窗口才要求第二层紧急压缩。",
+    flow: "第三层拼入 system、人格、Skills 目录、记忆和当前状态，再加第二层历史。开启spark时，与召回并行生成只供本轮使用的想象灵感；它可被忽略，不是记忆或执行结果。自身预算先裁剪；逼近模型实际窗口才要求第二层紧急压缩。",
     scope: "可按 agent 覆盖；保存并重启。token 是估算，不等于精确计费。",
   },
   memory: {
@@ -45,7 +45,7 @@ export const configurationGuide: Record<
   scheduler: {
     flow: "启动可编辑的定时子进程；默认脚本向第二层发 internal_event。新触发按同一打断逻辑处理，模型可选择沉默。重启重新抽随机时间，不补跑错过事件。",
     scope:
-      "每个 agent 有自己的 schedule.ts 和进程；主目录是公共默认值。自定义脚本只有读取相应字段才受其影响。保存后可只重启自己的脚本。",
+      "每个 agent 有自己的 schedule.ts、schedule.once.json 和进程；一次性任务由宿主调度，到期仍提交同一事件入口；主目录是公共默认值。自定义脚本只有读取相应字段才受其影响。保存后可只重启自己的脚本。",
   },
   drives: {
     flow: "读取 state 时驱动力向各自基线回稳；回合后模型提出增量，经敏感度和限幅处理。数值随当前状态给主模型，作为表达背景。",
@@ -68,7 +68,7 @@ export const configurationGuide: Record<
     scope: "每个 agent 有自己的 MCP 清单、环境和开关；保存并重启。",
   },
   prompts: {
-    flow: "这里只识别 system、query、searchDescription、rerank、emotion。system 覆盖 prompts/system.md；其余覆盖代码内辅助提示词。需要保留所要求的 JSON 字段。",
+    flow: "支持 system、query、searchDescription、rerank、emotion、spark、stateExpression。system 覆盖个人 system.md；其他覆盖个人 auxiliary.yaml 同名规则。stateExpression 直接解释主模型状态；辅助调用须保留所要求的 JSON 字段。",
     scope:
       "可按 agent 覆盖；配置中的覆盖保存并重启。删除键恢复文件或代码内默认提示词。",
   },
@@ -104,15 +104,15 @@ baseUrl|兼容接口根地址，通常到 /v1。模型列表和本槽位的请�
 apiKeyEnv|当前 agent 的 .env 内的变量名，如 OPENAI_API_KEY；实际 key 在凭据区填写。不能把 key 本身填这里。
 name|请求发给服务商的精确模型 ID。可从模型列表选择；列表不会检查工具、视觉或 JSON 支持。
 contextWindow|主模型预算计算使用的窗口大小。填大不会扩展服务商限制；辅助/embedding 槽位的此项目前不限制请求。
-maxOutput|主模型或辅助 JSON 调用的输出 token 上限。历史摘要另用 history.summaryTokens；embedding 忽略此项。
-reasoning|只传给第四层 Pi 主调用的推理强度。辅助模型、摘要、向量调用不消费此项。
-compat|只传给 Pi OpenAI 适配器的兼容键；有效名称取决于所安装 Pi 版本，辅助调用忽略。`,
+maxOutput|主模型或辅助 JSON 调用的总输出 token 上限，推理可能占用其中一部分。历史摘要请求取 main.maxOutput 与 history.summaryTokens 较大值；摘要实际保留文字仍受 summaryTokens 限制。embedding 忽略此项。
+reasoning|主对话和摘要使用 main 的推理强度；辅助请求使用各用途覆盖或 fast 的推理强度。辅助与摘要的 off 不发送参数，遵循服务端默认；向量不使用此项。
+compat|第四层 Pi 的兼容键。直连 api.deepseek.com 自动默认 supportsDeveloperRole=false，保留 system 身份，并默认 supportsMidConvoSystemMessages=true 保留背景的位置；用户明确值优先，其他端点保持 Pi 默认。辅助调用直接发送 system，不使用此项。`,
 );
 rows(
   "history",
   `triggerTokens|旧摘要加待保留原文的估算 token 超过此值才压缩。越大越多原文、成本更高；查看历史页不会触发压缩。
 targetTokens|压缩时从末尾尽量保留原文，容量扣除 summaryTokens 后作为保留目标。必须低于 triggerTokens，不是每轮硬裁切。
-summaryTokens|较早经历滚动摘要的模型输出预算；压缩保留重要事件、修正、未完成事项和工具结果。必须适配服务商输出上限。
+summaryTokens|滚动摘要最终保留的文字 token 上限。摘要请求的总输出额度取它与 models.main.maxOutput 的较大值，为推理和 JSON 留空间；输出仍须完整且文字不超此值，否则不推进压缩检查点。保留重要事件、修正、未完成事项和工具结果。
 toolTailTokens|历史视图仅保留工具结果末尾这些 token；工具名、参数仍在记录里，完整结果另存文件。不是当前工具循环的结果上限。
 pollMs|当前 agent 的第二层隔多少毫秒检查新触发；同批消息一起处理，有在途工作先取消。值越小响应越及时，也增加检查频率。`,
 );
@@ -122,13 +122,18 @@ rows(
 memoryTokens|自动召回记忆序列化后的总预算，某条超出剩余容量时跳过该条，继续尝试后面的。增大能带更多记忆，也增加输入量。
 stateTokens|Current state 的可读状态文本预算，包含心情、念头、关注点和交流间隔；不包含 activation、内部 ID 和更新时间。
 safetyTokens|模型窗口减去输出预算后额外预留的余量。总输入触及剩余窗口时要求历史紧急压缩；增大让输入更保守。
+spark|开启后，每轮让spark模型只看人格与本轮触发文本，返回一条可选的虚构联想。旧历史仍传给主模型，但不传给灵感模型；不写入state.json或memory.json。空结果、无文本、超时或错误时不注入，主流程继续；父运行取消仍立即取消。与召回并行，不改记忆检索。
+sparkProbability|每轮独立抽签一次，0.55表示55%；未抽中不调用灵感模型。有开关、文字且抽中才尝试生成，仍可能返回空或被跳过。按运行轮次计算，不按发送分句或工具循环计算；不与thought/focus互斥。
+sparkInputTokens|灵感模型的人格和当前输入合计预算，预留128 token给字段。当前输入取末尾，最多占剩余一半；人格取开头并使用剩余额度。缩小会丢掉部分人格或当前材料，不影响主模型获得的原始输入。
+sparkTokens|从有效JSON里提取spark字符串后，最多保留这些token，放入第三层动态背景；不是模型请求的总输出额度，后者用models.spark.maxOutput或继承fast。
+sparkTimeoutMs|最多等灵感请求这么多毫秒；超时记录context警告并跳过灵感。该请求和记忆召回并行，因此通常由两者较慢的一项决定准备时间。
 trace|保存初始编排、第二层交接和每次主模型请求快照。关闭后不新增快照，已有文件仍保留；图片只记元数据。`,
 );
 rows(
   "memory",
   `enabled|关闭时自动召回返回空列表。不会删除 memory.json，也不会单独关闭手动记忆工具和所有维护流程。
 query|启用时先调用 query 辅助模型生成线索；失败退回原查询。关闭则直接用最近对话材料检索。
-queryRecentMessages|本轮输入优先，另取最近这些条用户输入和内部触发帮助理解指代；助手回复分句和工具事件不作为查询材料。
+queryRecentMessages|本轮输入优先（可为内部触发），另取最近这些条真实用户输入帮助理解指代；旧内部触发、助手回复分句和工具事件不作为此前用户材料。
 queryInputTokens|送给 query 模型的材料截取上限；越大包含更多话题，可能稀释当前重点。
 queryDirections|保留辅助模型返回的前几条线索，拼成一个查询；当前不是并行多次向量搜索。
 queryTimeoutMs|提炼查询的等待上限，超时用原查询继续。
@@ -207,6 +212,8 @@ reportChars|保存心情变化原因 cause 的字符上限。
 thoughtsMax|本轮心情模型返回的念头列表最多保存几条，替换旧列表，不是长期记忆。
 thoughtTtlHours|念头超过此年龄后在读取状态时移除。
 thoughtHalfLifeHours|念头优先级排序的时间衰减半衰期；不直接删除念头。
+thoughtContextProbability|候选念头存在且呈现条数大于0时，每轮按此概率决定是否带入。0.15表示15%；不改变保存、评分、替换和过期逻辑。
+focusContextProbability|候选关注点存在且focusMax大于0时，每轮按此概率决定是否带入。0.2表示20%；未抽中不删除候选，不改变原始历史或决定任务是否执行。
 thoughtContextItems|拼 Current state 时最多呈现前几条念头，不改变保存数量。
 thoughtContextTokens|每条呈现念头的文本 token 截取上限。
 focusMax|模型本轮返回关注点时最多保存的条数。
@@ -317,9 +324,11 @@ headersEnv|环境变量名，其值为请求头 JSON，HTTP MCP 建连时解析�
 rows(
   "prompts",
   `system|替换基础 system 文本，然后仍会拼 persona、Project、Style；清除此键才重新使用 prompts/system.md。
+summary|历史整理规则，读个人 auxiliary.yaml。输入是结构化历史资料，只返回 {"summary":"..."}；不回复旧对话。格式错误不推进压缩检查点。
 query|替换查询线索提示词，要求返回 queries 数组；最近对话在输入里，不要改掉消费字段。
 searchDescription|替换检索描述生成提示词，要求返回 search_text；维护时用于尚无描述的条目。
 rerank|替换候选重排提示词，要求返回已存在编号的 ids 数组。
+spark|修改本轮想象灵感生成规则，须返回spark字符串，允许空字符串。只看人格与本轮触发，不是状态评分或真实执行；保存个人auxiliary.yaml后下一次调用读取。
 emotion|替换回合后判断提示词，保留 mood/emotions/drives/cause/thoughts/focus/memory_mentions 字段；程序仍会限幅。`,
 );
 export function guideKey(raw: string): string {

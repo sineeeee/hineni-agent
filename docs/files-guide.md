@@ -33,13 +33,13 @@
 
 路径：`agents/<agent_id>/prompts/system.md`。
 
-当前 agent 自己的基础行为要求（主目录同名文件是新建模板），例如如何理解打断、如何用工具、怎样把记忆作为主观经历参考。每个 agent 的 persona 在它后面追加。
+当前 agent 的通用运行规则（主目录同名文件是新建模板）：上下文、打断、工具、工作交付、发送和权限。身份名字、性格、亲密关系、兴趣及个别约定放persona.md，在[Persona]段追加。
 
 **谁更新、何时生效。** 修改个人文件后下一轮读取；修改主目录模板只影响新建。若有效配置里设置了 prompts.system，程序优先使用那段文字，此文件暂时不会被读取。
 
-1. ContextBuilder 先取 cfg.prompts.system；没有该值才读本文件。然后拼 persona，合计先限制到 4000 token。后续还会附上 [Project]、[Style] 和独立的历史/记忆/状态材料。
+1. ContextBuilder 先取 cfg.prompts.system；没有该值才读本文件。然后以[Operating rules]和[Persona]分别标记并拼接，合计先限制到4000 token，不新增模型调用。后续还会附上 [Project]、[Style] 和独立的历史/记忆/状态材料。
 2. 例如加入“交付文件时用附件工具”，会改变主模型收到的指令，但不会注册原本关闭的工具；runtime.toolsEnabled 等开关仍决定实际工具清单。
-3. 这是主对话指令，不直接改变 query、rerank 或 emotion 小模型的规则；那些指令分别由 prompts 下的对应配置覆盖。
+3. 这是主对话指令，不直接改变 query、rerank 或 emotion 小模型的规则；那些指令读同目录 auxiliary.yaml，也可由 prompts 同名配置覆盖。
 
 实现位置：`src/layer3/context.ts · build`；`src/config/schema.ts · prompts`。
 
@@ -47,11 +47,11 @@
 
 路径：`agents/<agent_id>/persona.md`。
 
-这个 agent 的身份、性格、对你的态度和相处方式。它直接参与每轮回复，不只是供人查阅的介绍。
+这个 agent 的身份、性格、关系、兴趣、表达习惯，以及用户特定偏好和信息边界。它直接参与每轮回复；通用工具与执行规则放在 prompts/system.md。
 
 **谁更新、何时生效。** 你或 agent 编辑；保存后下一轮读取。已经开始的那一轮仍用开始时读取的文字。
 
-1. ContextBuilder.build 每轮读这份 persona，拼在基础 system prompt 后面。两份文字合计先取前 4000 token，再附上环境目录和表达偏好；过长时后面的内容可能被截去。
+1. ContextBuilder.build 每轮读取，以[Persona]标记拼在[Operating rules]基础规则后；仍是同一API system角色。两份文字合计先取前4000 token，再附上环境目录和表达偏好；过长时后面的内容可能被截去。
 2. 例如增加“闲聊直接接话，不必每次追问”，会进入主模型的 system；不会给程序增加一个禁止问号的判断。style 也会一起影响表达，应避免两处互相冲突。
 3. 回合后判断心情时，afterRun 也读 persona，最多取前 1000 token，帮助小模型按这个人格理解经历。系统不会因为改了显示名而自动重写此文件。
 
@@ -67,7 +67,7 @@
 
 1. MemoryService.items 校验 memory 数组。已有合法条目保持独立；缺少 id 时生成编号。当前进程碰到错误 JSON 会保留上一份有效内容供搜索，但不会把错误文件擅自改好。
 2. sync 比较条目内容摘要和向量模型标识。变化的条目更新文字副本并清空旧描述/向量；搜索用副本在同一 agent 的 .runtime/search-index.json，记忆原文仍是这里。
-3. 每轮 recall 用查询线索挑选条目，按摘要、详情和总 token 空间裁取后，放进 user 背景中的 [Recalled memories: subjective past experiences]。不是每轮把整份 JSON 给主模型。
+3. 每轮 recall 用查询线索挑选条目，按摘要、详情和总 token 空间裁取后，放进 system 参考背景中的 [Recalled memories: subjective past experiences]。不是每轮把整份 JSON 给主模型。
 4. 真正重温后更新的是搜索副本里的 strength、strengthAt、familiarity，以及 state.json 的激活时间；不会自动改原条目的 importance 或删除忘得久的原文。
 
 |字段|用途与影响|
@@ -95,7 +95,7 @@
 
 1. state() 从 updated_at 算过去多久，把 mood 和各项 drives 向平常值恢复，把 emotions 向 0 消退，并移除过期念头、关注点和激活标记。恢复公式见对应配置旁的完整步骤。
 2. 第四层结束且有文字、工具或主动沉默时，后台 afterRun 调 emotion 模型，输入人格、当前状态、这轮经历和候选回忆；不等 Telegram 送达。结果经过倍率和上下限处理，再写这里。
-3. 下一轮 ContextBuilder 只取前 thoughtContextItems 条念头，每条限制 thoughtContextTokens；状态整体限制 stateTokens，放到 [Current state]。主模型参考这些感受，不需要逐项念出来。
+3. 下一轮 ContextBuilder 只取前 thoughtContextItems 条念头，每条限制 thoughtContextTokens；状态整体限制 stateTokens，放到 [Current state]。默认主模型看到心情底色、最强两项情绪、偏离常态的两项驱动力以及旧缘由；阈值、数量和措辞由个人prompt-mapping.yaml控制；完整数字不直接拼入。阈值与间隔映射见配置页“小模型行为与状态表达”。
 
 |字段|用途与影响|
 |---|---|
@@ -107,6 +107,7 @@
 |`focus`|当前关注点；focus_updated_at 决定它何时过期。|
 |`activation`|记忆编号到激活时刻的映射。自动召回只给没有标记的条目补时间，真正重温会刷新时间。|
 |`conversation_context`|第二层提供的同一回复目标交流间隔、上一段回复时间和 response_id；不是平台送达时间。|
+|`assessed_at`|最近一次回合后评分的时间，标记缘由属于何时；读取和自然衰减不会刷新它。旧文件可无此项。|
 |`updated_at`|上次状态补算/保存的时间基准，后续按它计算自然消退。|
 
 实现位置：`src/layer3/memory.ts · state / updateState / afterRun`；`src/layer3/context.ts · build`；`src/layer2/store.ts · gap`。
@@ -129,15 +130,66 @@
 
 路径：`prompts/system.md`。
 
-当前 agent 自己的基础行为要求（主目录同名文件是新建模板），例如如何理解打断、如何用工具、怎样把记忆作为主观经历参考。每个 agent 的 persona 在它后面追加。
+当前 agent 的通用运行规则（主目录同名文件是新建模板）：上下文、打断、工具、工作交付、发送和权限。身份名字、性格、亲密关系、兴趣及个别约定放persona.md，在[Persona]段追加。
 
 **谁更新、何时生效。** 修改个人文件后下一轮读取；修改主目录模板只影响新建。若有效配置里设置了 prompts.system，程序优先使用那段文字，此文件暂时不会被读取。
 
-1. ContextBuilder 先取 cfg.prompts.system；没有该值才读本文件。然后拼 persona，合计先限制到 4000 token。后续还会附上 [Project]、[Style] 和独立的历史/记忆/状态材料。
+1. ContextBuilder 先取 cfg.prompts.system；没有该值才读本文件。然后以[Operating rules]和[Persona]分别标记并拼接，合计先限制到4000 token，不新增模型调用。后续还会附上 [Project]、[Style] 和独立的历史/记忆/状态材料。
 2. 例如加入“交付文件时用附件工具”，会改变主模型收到的指令，但不会注册原本关闭的工具；runtime.toolsEnabled 等开关仍决定实际工具清单。
-3. 这是主对话指令，不直接改变 query、rerank 或 emotion 小模型的规则；那些指令分别由 prompts 下的对应配置覆盖。
+3. 这是主对话指令，不直接改变 query、rerank 或 emotion 小模型的规则；那些指令读同目录 auxiliary.yaml，也可由 prompts 同名配置覆盖。
 
 实现位置：`src/layer3/context.ts · build`；`src/config/schema.ts · prompts`。
+
+## 辅助规则、历史整理与状态表达
+
+路径：`agents/<agent_id>/prompts/auxiliary.yaml`。
+
+summary 让主模型整理历史摘要、query 提炼查询、searchDescription 生成检索句、rerank 重排、emotion 评分、spark 生成本轮想象灵感、stateExpression 指导主模型表达。每个键是一段可编辑提示词；保留规定的 JSON 返回字段。
+
+**谁更新、何时生效。** 个人文件保存后下次调用读取。config 的 prompts 同名覆盖优先；缺项用内置默认。数值范围与超时仍在配置表单。
+
+1. auxiliaryPrompt 按配置覆盖 → 个人文件对应键 → 内置默认的顺序读取。文件为 YAML 映射，每项是一段提示词；UI 保存校验键名、类型与非空内容。
+2. summary 输出非空 summary 字符串，历史资料放在 conversation_to_summarize 中，不继续旧聊天；query 输出 queries 数组；searchDescription 输出 search_text；rerank 输出 ids；emotion 输出 mood/emotions/drives/cause/thoughts/focus/memory_mentions；spark 输出spark字符串，空字符串表示不提供联想，不写记忆或状态。stateExpression 是直接给主模型的背景指导，不调用辅助模型。
+3. emotion 在整轮结束后读取本轮输入/结果，以及开跑前截取的最近最多五轮交流（连续输入与回复分段合为一轮，最多 2000 token 且不超过 state.inputTokens 的三分之一）；旧交流只帮助理解，不重复计分。cause 区分自己的感受与对用户的猜测，thoughts/focus 可为空。emotion 的 policy 自动包含允许名称、启用驱动力和数值限幅。评分先按分数给增量，程序再乘敏感度并限幅一次。模型与超时仍从 models/state/memory 配置读取；查询缓存到期才重算相同输入。
+
+实现位置：`src/config/auxiliary.ts`；`src/layer3/memory.ts`；`src/layer3/context.ts`。
+
+## 状态与时间的提示词映射
+
+路径：`agents/<agent_id>/prompts/prompt-mapping.yaml`。
+
+把心情、情绪、驱动力和时间间隔变成自然文字。可修改阈值、展示数量、名称和句子模板；只改表达，不改情绪评分。
+
+**谁更新、何时生效。** 保存后下一轮读取，无需重启。缺少字段用内置默认；数组整组替换。主目录同名文件只用于新建模板，不覆盖个人文件。
+
+1. ContextBuilder每轮读取当前agent的个人文件，缺字段补内置默认，再交stateContext渲染。此映射渲染不会调用小模型、改变state.json分数或覆盖config；text.spark控制已生成灵感的包装，text.thought和text.focus控制旧念头与关注点措辞。出现概率在个人config的context.sparkProbability、state.thoughtContextProbability、state.focusContextProbability；心情、念头和关注受stateTokens限制，灵感受sparkTokens限制，合并后再受第三层总预算限制。
+2. bands按min从小到大写，第一档必须从0开始；达到min就进入该档，使用最高符合档。心情/情绪单位是分数，gap/cause单位是秒。数组修改时写完整列表。
+3. 网页保存校验结构、阈值顺序和占位符。未知字段、负数、重复或倒序阈值、错拼占位符会拒绝；直接写文件导致格式错误则下一轮明确报错，不悄悄使用错误规则。填{}恢复内置默认；删除某个字段恢复该字段默认。
+
+|字段|用途与影响|
+|---|---|
+|`mood`|bands指定分数→说法；template用{label}。心情先四舍五入。|
+|`emotions`|min最低展示分数；maxItems最多展示几项，0隐藏；bands强度分档；item用{name}/{label}，template用{items}，separator连接各项。|
+|`drives`|minDeviation与自身baseline相差多少才展示；maxItems最多几项；names中文名称；stronger/weaker比较词；item用{name}/{direction}，template用{items}，separator连接。|
+|`gap`|bands以秒分档，text可用{duration}（自动显示分钟/小时/天）；unknown是无历史时的说法。state.gap仍是总开关。|
+|`cause`|enabled开关旧缘由；bands按距assessed_at的秒数分档；unknown为无评分时间的旧记录；dated用{label}/{time}；template用{when}/{cause}。|
+|`text`|now当前时间用{time}；thought念头和spark本轮灵感用{text}；focus关注用{items}，focusSeparator连接关注。念头数量和长度仍由原有state配置控制。|
+
+实现位置：`src/config/prompt-mapping.ts`；`src/layer3/state-context.ts`；`src/layer3/context.ts`。
+
+## 一次性任务
+
+路径：`agents/<agent_id>/schedule.once.json`。
+
+tasks 数组：id 为唯一编号，at 为带时区的绝对时间，text 为内部提醒，enabled 控制启用。UI 配置→主动行为与定时可增删启停；也可直接编辑。
+
+**谁更新、何时生效。** 保存后重启当前 agent 调度。未来时间继续等待，过期跳过；无补跑、无完成状态。定时到期只表示提交第二层，并不保证模型完成或渠道送达。
+
+1. Scheduler 启动或重启时先校验 tasks；每项包含唯一 id、带时区的 at、任务说明 text、enabled。未来任务按绝对时间等待，过去时间跳过。
+2. 到期生成稳定事件编号，通过现有 POST /v1/events 进入第二层。关闭或删除后重启才取消尚未触发计时；已入第二层事件不会撤回。失败记日志，不自动重试；没有任务完成状态。
+3. 只要 scheduler.enabled 开启且自己的脚本在运行，宿主就管理此文件，不要求自定义脚本自行读取。更换脚本仍保留一次性任务。
+
+实现位置：`src/once-tasks.ts`；`src/scheduler.ts`；`src/admin/files.ts`。
 
 ## 定时与随机事件脚本
 

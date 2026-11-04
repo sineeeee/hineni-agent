@@ -17,6 +17,7 @@ import { fieldLessons } from "../config/learning.js";
 import { processingGuide } from "../config/processing-guide.js";
 import { describeFile } from "./file-guide.js";
 import { skillsList } from "../layer3/context.js";
+import { cleanupRoutes } from "./cleanup.js";
 export interface AdminLifecycle {
   restart(): Promise<void>;
   status(): unknown;
@@ -30,6 +31,7 @@ export async function controls(
   lifecycle?: AdminLifecycle,
 ) {
   const files = new AdminFiles(config);
+  cleanupRoutes(app, config, runtime);
   const historyViews = new Map<
     string,
     { key: string; view: ReturnType<History["inspect"]> }
@@ -95,7 +97,11 @@ export async function controls(
         view: new History(
           runtime.db,
           effective,
-          new OpenAIModels(effective, runtime.environments.get(id)),
+          new OpenAIModels(
+            effective,
+            runtime.environments.get(id),
+            runtime.agentRoot(id),
+          ),
         ).inspect(id),
       };
       historyViews.set(id, cached);
@@ -310,6 +316,9 @@ export async function controls(
                 ? path.join(base, "traces", r + ".json")
                 : path.join(base, "requests", r, body.request),
             ];
+      const requestDirectory = path.join(base, "requests", r);
+      if (body.mode === "all")
+        await files.resolve(path.relative(config.root(), requestDirectory));
       let deleted = 0;
       for (const p of paths) {
         await files.resolve(path.relative(config.root(), p));
@@ -320,6 +329,8 @@ export async function controls(
           if (e.code !== "ENOENT") throw e;
         }
       }
+      if (body.mode === "all")
+        await fs.rm(requestDirectory, { recursive: true, force: true });
       return { deleted_snapshots: deleted };
     },
   );

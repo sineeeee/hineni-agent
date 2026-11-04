@@ -26,7 +26,7 @@ const stages: Record<string, ProcessingGuide> = {
   },
   model: {
     steps: [
-      "先由 agentConfig 合并该 agent 的有效模型配置。主模型交给 PiExecutor；query、maintenance、emotion、rerank 分别把自己的字段覆盖在 fast 上；embedding 单独使用向量模型。",
+      "先由 agentConfig 合并该 agent 的有效模型配置。主模型交给 PiExecutor；query、maintenance、emotion、rerank、spark 分别把自己的字段覆盖在 fast 上；embedding 单独使用向量模型。",
       "每个模型槽位通过 protocol 选择 Responses 或 Chat Completions。主模型由 Pi 转换工具和消息；辅助模型发送用途指令与本次材料，要求 JSON；摘要沿用主模型协议，向量模型始终走 embeddings。Responses 设置 store:false，每次完整传入编排材料，不接远端会话。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。",
       "模型设置不由运行结果回写。辅助结果由记忆或心情模块接收，影响本轮回忆或下一轮状态。",
     ],
@@ -40,8 +40,8 @@ const stages: Record<string, ProcessingGuide> = {
     steps: [
       "ContextBuilder.build 调用 History.view：从数据库的 history:<agent_id> 读取已压缩到哪个事件（through）和累计摘要（summary），再读取 through 之后的事件。投递确认和 run_finished 不加入这份历史。",
       "History.render 保留事件时间、来源、发言人、正文和附件说明；旧工具结果只取末尾 toolTailTokens。估算“旧摘要＋剩余原文”的 token 数。",
-      "超过 triggerTokens 时，从最新内容往前尽量留出 targetTokens−summaryTokens 的原文空间，其余较早事件分批交给 main 模型总结，输入同时包含旧摘要。总结成功后把新的 through/summary 写回数据库；原始 JSONL 不改。",
-      "最后把累计摘要和保留原文交给第三层，放到第一条 user 消息的 [Recorded experience] 背景中。下一轮从新 through 接续，而不是再总结全部历史。",
+      "超过 triggerTokens 时，从最新内容往前尽量留出 targetTokens−summaryTokens 的原文空间，其余较早事件分批交给 main 模型总结，输入同时包含旧摘要和最终摘要 token 预算；请求总输出额度取 summaryTokens 与 models.main.maxOutput 的较大值，避免推理先耗尽摘要额度。只接受完整 JSON 和未超过保留预算的摘要；不完整或超限不推进检查点。总结成功后把新的 through/summary 写回数据库；原始 JSONL 不改。",
+      "最后把累计摘要和保留原文交给第三层，以摘要消息和原有user/assistant消息排列在动态背景之前。下一轮从新 through 接续，而不是再总结全部历史。",
     ],
     code: [
       "src/layer2/history.ts · History.render / view",
@@ -51,13 +51,14 @@ const stages: Record<string, ProcessingGuide> = {
   },
   context: {
     steps: [
-      "每轮先获得第二层历史，再自动查找记忆、更新交流间隔并读取状态。基础 prompt＋persona 合计先取最多 4000 token；随后附加最多 5000 token 的 [Project]（目录、发送目标、Skills 清单）和 [Style]。",
+      "每轮先获得第二层历史，再自动查找记忆、更新交流间隔并读取状态。开启context.spark时，每轮先按sparkProbability独立抽签；未抽中不发辅助请求。抽中后与记忆召回并行调用独立灵感模块：只给人格与本轮原始文字，不给旧聊天、回忆、状态或自动时钟。有效spark字符串按sparkTokens裁剪，通过个人prompt-mapping.yaml的text.spark模板，作为可忽略的本轮想象背景；不持久化、不自动执行，也不调整情绪。超时、异常或非字符串结果记录context警告并跳过；本轮被取消仍向上传播取消。基础 prompt＋persona 合计先取最多 4000 token；随后附加最多 5000 token 的 [Project]（目录、发送目标、Skills 清单）和 [Style]。",
       "system 先按 layer3Tokens−stateTokens−200 预留空间裁切。另把回忆写入 [Recalled memories]，把状态写入 [Current state]，再按 layer3Tokens 减 system 实际长度裁切这份动态背景。这里裁的是文本，过小可能截断 JSON 的末尾。",
       "检查主模型容量：可用输入≈contextWindow−maxOutput−safetyTokens。如果 system、历史和动态背景仍超限，才要求第二层再压缩历史；图片另按每张 4096 token 预留。仍装不下就报错。",
+      "初始顺序：system与人格/工具说明 → 历史摘要和原文 → system角色的本轮召回、角色自身状态与时间背景 → user角色的最新触发批次及附件。当前真人输入之前尚未获得成功文字回复的连续真人输入一起移到背景之后；不重复放在历史原文中。背景每轮替换，不写进历史；同批新消息只出现一次，图片预算再次压缩后仍按此顺序重建。",
       "trace 开启时保存构建结果和 layer2 交接材料到 .runtime/traces/<run>.json；第四层还把每次主请求保存到 .runtime/requests/<run>/。不回写这些预算参数。",
     ],
     code: [
-      "src/layer3/context.ts · ContextBuilder.build",
+      "src/layer3/context.ts · ContextBuilder.build；spark.ts · createTurnSpark",
       "src/layer4/pi.ts · transformContext / request trace",
       "src/shared/tokens.ts · cut / tokens",
     ],
@@ -85,9 +86,9 @@ const stages: Record<string, ProcessingGuide> = {
   state: {
     steps: [
       "MemoryService.state 先读 state.json，以 updated_at 到现在经过的时间补算消退。整体心情=baseline+(旧心情−baseline)×2^(−经过小时/moodHalfLifeHours)；各项短期情绪=旧值×2^(−经过分钟/emotionHalfLifeMinutes)。过期念头、关注点和激活标记在此清理。",
-      "第四层启动后有文字、工具结果或主动沉默并结束，Runtime 才把这轮交给后台 afterRun；不等待发送成功。afterRun 给 emotion 模型的 user 材料包含 persona、policy、state、本轮 input 和候选 memories。",
+      "第四层启动后有文字、工具结果或主动沉默并结束，Runtime 才把这轮交给后台 afterRun；不等待发送成功。afterRun 给 emotion 模型的 user 材料包含 persona、policy、过滤后的state、本轮 input 和候选 memories；不传activation编号表和conversation_context路由数据。policy 明确 0–100 分制、允许情绪名称、启用驱动力、敏感度和限幅；评分提示词要求返回分数增量且不自行乘倍率。",
       "收到建议后：整体心情增量先乘 eventSensitivity，再限制到 ±moodDeltaLimit，累加后限制在 0–100。单项情绪和驱动力用各自倍率，限制到 ±dimensionDeltaLimit，再限制最终范围。返回 thoughts/focus 数组时替换当前列表；未返回时保留旧列表。",
-      "updateState 串行写 state.json。下一轮 ContextBuilder 读取它，裁到 stateTokens 后拼入 [Current state]。旧轮后台尚未完成时，新轮可能先读到旧状态。单纯 GET state 会补算但不保证当场写文件；经过 updateState 才保存。",
+      "updateState 串行写 state.json。下一轮 ContextBuilder 读取它，每轮先读取个人prompts/prompt-mapping.yaml（缺字段用内置默认，列表整体替换），每轮按thoughtContextProbability和focusContextProbability分别抽一次，只决定现有候选是否呈现；未抽中不清除state。stateContext按映射挑自然描述；默认：心情按25/42/62/80分档；情绪至少1分、取最高两项，按15/40/70分档；驱动力偏离自己baseline至少5分才取最突出两项。裁到 stateTokens 后拼入 [Current state]，完整数字留在文件。assessed_at只在回合评分时更新，用来注明缘由的时间；updated_at仍是衰减计算时间。旧轮后台尚未完成时，新轮可能先读到旧状态。stateExpression 告诉主模型这是此前背景，当前输入可立即改变反应；closeness 是短时冲动而非关系评分。日志 mood 显示实际应用增量与被忽略名称，不记录本轮私密正文。单纯 GET state 会补算但不保证当场写文件；经过 updateState 才保存。",
     ],
     code: [
       "src/layer3/memory.ts · state / updateState / afterRun",
@@ -99,7 +100,7 @@ const stages: Record<string, ProcessingGuide> = {
     steps: [
       "每次 MemoryService.state 读取状态，已关闭的驱动力被移除；开启的按“baseline+(旧值−baseline)×2^(−经过小时/halfLifeHours)”向自己的常态恢复。",
       "afterRun 接收 emotion 模型建议的 drives.<名称> 增量，乘这项 sensitivity，再限制到 ±state.dimensionDeltaLimit，累加后限制到本项 min/max；未知或已关闭的名称忽略。",
-      "结果通过 updateState 存入 state.json.drives，下一轮随 [Current state] 给主模型。这个分数本身不会触发随机聊天或定时任务；没有另一个欲望调度器。",
+      "结果通过 updateState 存入 state.json.drives；下一轮只把偏离常态至少5分的最多两项映射成“比平常更强/弱一些”放入 [Current state]。这个分数本身不会触发随机聊天或定时任务；没有另一个欲望调度器。",
     ],
     code: [
       "src/layer3/memory.ts · state / afterRun",
@@ -109,7 +110,7 @@ const stages: Record<string, ProcessingGuide> = {
   style: {
     steps: [
       "ContextBuilder 在每轮开始读取有效 style 配置，写成 system 中的 [Style] 段。开头说明日常通常一两句；句数、字数、段数和主动提旧事数量是软上限，不要求达到。复杂交付按需展开。",
-      "warmth、humor、directness、restraint、emotionExpression 小于 0.34 写“较少”，小于 0.67 写“适中”，其余写“较强”；其他字段使用数值或 true/false 写入。这里没有另一次场景判断 API。",
+      "warmth、humor、directness、restraint、emotionExpression 小于 0.34 写“较少”，小于 0.67 写“适中”，其余写“较强”；其他字段使用数值或 true/false 写入。emotionExpression 和 restraint 还会按相同分界附上具体行为指导（轻轻带过/具体反应/明显流露，以及按场景收住感受）。这里没有另一次场景判断 API。",
       "主模型结合完整背景决定怎样表达。程序不根据这几个数字裁剪已生成回复，也不为口头禅或重复旧事维护严格计数；最终发送拆分另由第四层和 delivery 处理。",
     ],
     code: [
@@ -200,7 +201,7 @@ const stages: Record<string, ProcessingGuide> = {
   },
   prompts: {
     steps: [
-      "对应模块优先使用 cfg.prompts.<用途>，未配置才读取默认文本。system 的默认来源是当前 agent 的 prompts/system.md；其他辅助用途的默认指令在 MemoryService 代码内。",
+      "对应模块优先使用 cfg.prompts.<用途>，未配置才读取默认文本。system 的默认来源是当前 agent 的 prompts/system.md；query/searchDescription/rerank/emotion/spark/stateExpression 读取个人 prompts/auxiliary.yaml；文件缺项回退内置默认。个人文件每次调用读取，配置覆盖仍须保存重启。",
       "system 后面仍拼人格、[Project] 和 [Style]。辅助指令交给 OpenAIModels.json，自动附加“Return one JSON object.”，本次材料作为独立 user JSON 发送。",
       "返回值必须使用各用途约定的字段，程序才会消费它。它不是由主模型修改自身 prompt 的接口；参数保存后重新加载，已有运行不追溯改变。",
     ],
@@ -215,7 +216,7 @@ const query: ProcessingGuide = {
   steps: [
     "ContextBuilder 将本轮输入放在查询材料开头，预留约七成 queryInputTokens；近期用户话和内部触发补充指代背景，助手分句和工具不计入。",
     "recall 以这份材料做缓存键。query 开启且缓存不可用时，把开头 queryInputTokens 个 token 交给 query 模型，system 使用 prompts.query 或默认“最多三条查找旧事的查询”。",
-    "取返回 queries 的前 queryDirections 条合成一个查询，不再拼回整段对话；空数组表示本轮无需召回旧事。它们不是多次独立检索。成功结果只缓存在本进程，queryCacheSeconds 后失效。失败或超过 queryTimeoutMs 就用原材料。",
+    "把返回 queries 的前 queryDirections 条追加到原始检索材料，一起进行关键词和向量检索；空数组仍使用原始材料检索。它们不是多次独立检索。成功结果只缓存在本进程，queryCacheSeconds 后失效。失败或超过 queryTimeoutMs 就用原材料。",
     "search 再把查询开头最多 1000 token 交给 embedding，把结果用于语义比较；词法匹配也用查询文本。查询句本身不直接替换主模型历史，只有最终回忆进入 [Recalled memories]。",
   ],
   code: [
@@ -351,7 +352,7 @@ export function processingGuide(key: string): ProcessingGuide {
       steps: [
         "ContextBuilder 选定这一轮回复目标后，调用第二层 Store.gap；查询同一 agent、同一目标最近一条 agent_reply 文字块。",
         "计算当前时刻减那条记录的提交时间，返回 seconds_since_last_response、上次时间和 response_id；没有历史回复则间隔未知。不是按 Telegram 送达算，也不是一轮生成结束算。",
-        "通过 MemoryService.updateState 写到 state.json.conversation_context。下一轮又重新计算；ContextBuilder 把当轮值放到 [Current state]，同时保存在 trace.layer2 供检查。关闭 gap 会移除状态中的这个字段。",
+        "通过 MemoryService.updateState 写到 state.json.conversation_context。下一轮又重新计算；stateContext 将当轮间隔按1分钟/15分钟/2小时分档，写成自然时间距离和接话建议放到 [Current state]，同时保存在 trace.layer2 供检查。关闭 gap 会移除状态中的这个字段。",
       ],
       code: [
         "src/layer2/store.ts · Store.gap",

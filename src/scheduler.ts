@@ -1,3 +1,4 @@
+import { OnceTasksSchema, armOnceTasks, onceEventId } from "./once-tasks.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -6,6 +7,7 @@ import type { ConfigStore } from "./config/store.js";
 import type { Store } from "./layer2/store.js";
 /** One independently restartable process per agent; timer progress is not persisted. */
 export class Scheduler {
+  private onceStops = new Map<string, () => Promise<void>>();
   private children = new Map<string, ChildProcess>();
   private retries = new Map<string, NodeJS.Timeout>();
   private stopping = false;
@@ -32,6 +34,58 @@ export class Scheduler {
         });
         continue;
       }
+      const oncePath = path.join(root, "schedule.once.json");
+      const tasks = OnceTasksSchema.parse(
+        fs.existsSync(oncePath)
+          ? JSON.parse(fs.readFileSync(oncePath, "utf8"))
+          : { tasks: [] },
+      ).tasks;
+      const controller = new AbortController();
+      const cancelTimers = armOnceTasks(
+        tasks,
+        async (task) => {
+          const response = await fetch(
+            `http://127.0.0.1:${cfg.server.port}/v1/events`,
+            {
+              method: "POST",
+              signal: AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(10000),
+              ]),
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${process.env[cfg.server.tokenEnv] ?? ""}`,
+              },
+              body: JSON.stringify({
+                protocol_version: 1,
+                event_id: onceEventId(a.id, task),
+                agent_id: a.id,
+                type: "internal_event",
+                source: "scheduler",
+                text: task.text,
+                data: { kind: "once", task_id: task.id, scheduled_at: task.at },
+              }),
+            },
+          );
+          if (!response.ok)
+            throw Error(`One-time event rejected: ${response.status}`);
+          this.db.log(
+            "info",
+            "scheduler",
+            "One-time event accepted (not proof of task completion)",
+            { agent: a.id, task: task.id },
+          );
+        },
+        (e) => {
+          if (!controller.signal.aborted)
+            this.db.log("warn", "scheduler", String(e), { agent: a.id });
+        },
+      );
+      this.onceStops.set(a.id, async () => {
+        const pending = cancelTimers();
+        controller.abort();
+        await pending;
+      });
       const child = spawn(
         process.execPath,
         [
@@ -69,6 +123,8 @@ export class Scheduler {
       child.on("exit", (code) => {
         if (this.children.get(a.id) !== child) return;
         this.children.delete(a.id);
+        void this.onceStops.get(a.id)?.();
+        this.onceStops.delete(a.id);
         this.db.log("warn", "scheduler", "Script exited", {
           agent: a.id,
           code,
@@ -87,6 +143,8 @@ export class Scheduler {
     }
   }
   private async stopAgent(id: string) {
+    await this.onceStops.get(id)?.();
+    this.onceStops.delete(id);
     clearTimeout(this.retries.get(id));
     this.retries.delete(id);
     const child = this.children.get(id);
@@ -120,6 +178,15 @@ export class Scheduler {
     if (id && !this.config.current.agents.some((a) => a.id === id))
       throw Error("Unknown agent");
     const ids = id ? [id] : this.config.current.agents.map((a) => a.id);
+    // Validate before stopping any running schedule.
+    for (const agent of ids) {
+      const file = path.join(
+        this.config.agentRoot(agent),
+        "schedule.once.json",
+      );
+      if (fs.existsSync(file))
+        OnceTasksSchema.parse(JSON.parse(fs.readFileSync(file, "utf8")));
+    }
     await Promise.all(
       ids.map((id) => {
         const job = (this.writers.get(id) ?? Promise.resolve()).then(

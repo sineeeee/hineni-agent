@@ -177,6 +177,23 @@ export class ConfigStore {
         path.join(dir, "prompts/system.md"),
       );
       await copyOnce(
+        this.resolve("prompts/auxiliary.yaml"),
+        path.join(dir, "prompts/auxiliary.yaml"),
+      );
+      await copyOnce(
+        this.resolve("prompts/prompt-mapping.yaml"),
+        path.join(dir, "prompts/prompt-mapping.yaml"),
+      );
+      try {
+        await fs.writeFile(
+          path.join(dir, "schedule.once.json"),
+          '{"tasks":[]}\n',
+          { flag: "wx", mode: 0o600 },
+        );
+      } catch (e: any) {
+        if (e.code !== "EEXIST") throw e;
+      }
+      await copyOnce(
         this.resolve("scripts/schedule.ts"),
         path.join(dir, script),
       );

@@ -20,7 +20,7 @@ function renderer() {
   const nodes: any[] = [];
   const fields = new Map<string, any>();
   const settingCode = client.slice(
-    client.indexOf("async function renderSettings()"),
+    client.indexOf("const onceDrafts="),
     client.indexOf("let modelScope="),
   );
   const pathCode = client.slice(
@@ -68,6 +68,8 @@ function renderer() {
   let failSave = false;
   const storage = new Map<string, string>();
   const api = async (_url: string, method = "GET", body?: any) => {
+    if (_url.startsWith("/v1/admin/file?"))
+      return { content: '{"tasks":[]}', version: "tasks-v1" };
     if (method === "PUT") {
       if (failSave) throw Error("test disk failure");
       stored = structuredClone(body.config);
@@ -96,7 +98,7 @@ function renderer() {
     client.indexOf("let savingConfig="),
     client.indexOf("function agentOptions()"),
   );
-  const setup = `let savedCfg=structuredClone(cfg), revision='initial',dirty=false,view='agents';
+  const setup = `let savedCfg=structuredClone(cfg), revision='initial',dirty=false,fileDirty=false,view='agents';
     const clone=structuredClone, agentId=cfg.agents[0].id;
     const refreshPromptPreviews=()=>{},agentOptions=()=>{},notify=()=>{},restart=async()=>{};
     const show=async()=>view==='settings'?renderSettings():renderAgents(),actionHelp=()=>null;
@@ -105,6 +107,7 @@ function renderer() {
     const overrideGroups=['models','history','context','memory','state','style','runtime','delivery','prompts','drives','scheduler','mcp'];
     const explanationKey=x=>x, inheritanceControl=()=>null,fieldExplanation=()=>null,inlineFieldExplanation=(p,s,v,update)=>{fields.set(p,{value:v,update});return null;};
     const btn=(text,fn)=>el('button',{text,fn}),panel=(title,...children)=>el('section',{title},...children);
+    const replaceContent=(node,...children)=>{node.children=children.flat().filter(Boolean);};
     const task=fn=>fn();`;
   const run = new Function(
     "cfg",
@@ -271,5 +274,91 @@ test("Malformed JSON blocks saving without dropping its draft", async () => {
   assert.deepEqual(
     JSON.parse(r.storage.get("hineni-config-draft")!).jsonEdits,
     [["agents.0.overrides.style", "{"]],
+  );
+});
+
+test("cleanup UI selects runs and routes execution/context/log actions separately", async () => {
+  const nodes: any[] = [],
+    calls: any[] = [];
+  const el = (tag: string, attrs: any = {}, ...children: any[]) => {
+    const n: any = {
+      tag,
+      attrs,
+      ...attrs,
+      children: children.flat().filter(Boolean),
+      append(...x: any[]) {
+        this.children.push(...x);
+      },
+    };
+    nodes.push(n);
+    return n;
+  };
+  const api = async (url: string, method = "GET", body?: any) => {
+    calls.push({ url, method, body });
+    if (url === "/v1/logs/storage")
+      return {
+        database: "/test/data/runtime.sqlite",
+        table: "logs",
+        count: 1,
+        stdout: "external",
+      };
+    if (url === "/v1/logs" && method === "GET")
+      return [
+        {
+          level: "info",
+          component: "test",
+          at: new Date().toISOString(),
+          message: "log",
+          data: "{}",
+        },
+      ];
+    if (method === "DELETE") return { deleted_runs: 1, deleted_logs: 1 };
+    return [
+      { id: "r1", started_at: new Date().toISOString(), status: "complete" },
+    ];
+  };
+  const runCode = client.slice(
+    client.indexOf("async function getRuns()"),
+    client.indexOf("let detailSignature="),
+  );
+  const logsCode = client.slice(
+    client.indexOf("async function renderLogs()"),
+    client.indexOf("\nsetInterval("),
+  );
+  const ui = new Function(
+    "el",
+    "api",
+    `
+    let view='runs',agentId='main',selectedRun=null,runList=[],recordPath=null,contextRequest=null,contextSignature='',detailSignature='',logFilter='';
+    const agentPath=()=>'/v1/agents/'+agentId,confirm=()=>true,notify=()=>{},show=async()=>{},time=s=>s,short=s=>s,stateNames={},empty=s=>el('div',{text:s}),panel=(title,...children)=>el('section',{title},...children),btn=(text,fn)=>el('button',{text,fn}),setTimeout=()=>{},task=fn=>fn(),loadRun=()=>{},$=()=>null,badge=s=>el('span',{text:s}),replaceContent=(n,...c)=>{n.children=c;};
+    ${runCode}\n${logsCode}
+    return {renderRuns,renderLogs,deleteRunRecords,runButtons,setView:v=>view=v,selectedRunRecords};
+  `,
+  )(el, api);
+  await ui.renderRuns();
+  assert.ok(nodes.some((n) => n.tag === "button" && n.text === "全部清理"));
+  const checkbox = nodes.find(
+    (n) => n.tag === "input" && n.type === "checkbox",
+  );
+  assert.ok(checkbox);
+  checkbox.onchange({ target: { checked: true } });
+  await ui.deleteRunRecords("runs", "selected");
+  let last = calls.filter((c) => c.method === "DELETE").at(-1);
+  assert.equal(last.url, "/v1/agents/main/execution-records");
+  assert.deepEqual(last.body, { mode: "selected", run_ids: ["r1"] });
+  ui.setView("context");
+  await ui.deleteRunRecords("context", "all");
+  last = calls.filter((c) => c.method === "DELETE").at(-1);
+  assert.equal(last.url, "/v1/agents/main/context-records");
+  assert.deepEqual(last.body, { mode: "all" });
+  nodes.length = 0;
+  await ui.renderLogs();
+  assert.ok(nodes.some((n) => n.text?.includes("/test/data/runtime.sqlite")));
+  await nodes.find((n) => n.tag === "button" && n.text === "按天数清理").fn();
+  last = calls.filter((c) => c.method === "DELETE").at(-1);
+  assert.equal(last.url, "/v1/logs");
+  assert.equal(last.body.mode, "before");
+  assert.ok(
+    Math.abs(Date.now() - Date.parse(last.body.before) - 7 * 86400000) < 1000,
   );
 });

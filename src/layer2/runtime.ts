@@ -17,6 +17,7 @@ import type {
 import { EventSchema, triggerTypes } from "../contracts/index.js";
 import { ConfigStore } from "../config/store.js";
 import { Store } from "./store.js";
+import { emotionHistory } from "./emotion-history.js";
 import { History } from "./history.js";
 import { MemoryService } from "../layer3/memory.js";
 import { ContextBuilder } from "../layer3/context.js";
@@ -52,7 +53,7 @@ export class Runtime {
   constructor(
     public config: ConfigStore,
     public db: Store,
-    private restartScheduler: (id?: string) => Promise<void>,
+    private restartScheduler: (id?: string) => Promise<unknown>,
     private llm: Intelligence = new OpenAIModels(config.current),
     private factory: ExecutorFactory = (h, l, r) => new PiExecutor(h, l, r),
   ) {
@@ -79,7 +80,11 @@ export class Runtime {
           db,
           agentConfig(this.cfg, a),
           llm instanceof OpenAIModels
-            ? new OpenAIModels(agentConfig(this.cfg, a), config.agentEnv(a.id))
+            ? new OpenAIModels(
+                agentConfig(this.cfg, a),
+                config.agentEnv(a.id),
+                this.agentRoot(a.id),
+              )
             : llm,
         ),
       );
@@ -165,7 +170,11 @@ export class Runtime {
     const cfg = agentConfig(this.cfg, a),
       llm =
         this.llm instanceof OpenAIModels
-          ? new OpenAIModels(cfg, this.environments.get(a.id))
+          ? new OpenAIModels(
+              cfg,
+              this.environments.get(a.id),
+              this.agentRoot(a.id),
+            )
           : this.llm;
     const signalWithTimeout = AbortSignal.any([
       signal,
@@ -176,6 +185,17 @@ export class Runtime {
       executed = false;
     const memory = this.memories.get(a.id)!;
     const history = new History(this.db, cfg, llm);
+    const recentDialogue = emotionHistory(
+      this.db
+        .recent(
+          a.id,
+          ["incoming_message", "internal_event", "agent_reply"],
+          500,
+        )
+        .filter((e) => e.seq < Math.min(...batch.map((b) => b.seq))),
+      new Set(batch.map((e) => e.event_id)),
+      Math.min(2000, Math.floor(cfg.state.inputTokens / 3)),
+    );
     let chunk = 0;
     const record = (e: any) =>
       this.db.append({
@@ -195,6 +215,8 @@ export class Runtime {
         path.join(this.agentRoot(a.id), "prompts"),
         history,
         memory,
+        llm,
+        this.config.root(),
       ).build(batch, runId, signalWithTimeout);
       signalWithTimeout.throwIfAborted();
       const host: ToolHost = {
@@ -304,8 +326,9 @@ export class Runtime {
             await memory.afterRun(
               runId,
               {
-                request: captured.inputText,
+                request: batch.map((e) => history.modelText(e)).join("\n"),
                 result: finished,
+                recent_dialogue: recentDialogue,
                 tools: this.db
                   .runEvents(a.id, runId)
                   .filter((e) => e.type === "tool_result")

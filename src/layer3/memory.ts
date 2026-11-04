@@ -1,3 +1,4 @@
+import { auxiliaryPrompt } from "../config/auxiliary.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -23,6 +24,7 @@ const Item = z
 export type Memory = z.infer<typeof Item> & { id: string };
 export interface State {
   updated_at: string;
+  assessed_at?: string;
   mood: number;
   emotions: Record<string, number>;
   drives: Record<string, number>;
@@ -304,8 +306,7 @@ export class MemoryService {
             ]);
             if (this.cfg.memory.searchDescription && !description) {
               const d = await this.llm.json(
-                this.cfg.prompts.searchDescription ??
-                  '根据原记忆生成简短检索句，保留具体人物、事件和可能唤起的表达，不能编造。返回 {"search_text":"..."}',
+                await auxiliaryPrompt(this.root, this.cfg, "searchDescription"),
                 { memory: m },
                 deadline,
                 "maintenance",
@@ -478,8 +479,7 @@ export class MemoryService {
     if (this.cfg.memory.rerank && results.length > 1 && !explicit)
       try {
         const out = await this.llm.json(
-          this.cfg.prompts.rerank ??
-            '按与查询的直接相关性排列记忆编号。只返回 {"ids":["..."]}，不增添编号。',
+          await auxiliaryPrompt(this.root, this.cfg, "rerank"),
           {
             query,
             memories: results.map((x) => ({
@@ -551,17 +551,18 @@ export class MemoryService {
         else {
           const deadline = AbortSignal.timeout(this.cfg.memory.queryTimeoutMs);
           const r = await this.llm.json(
-            this.cfg.prompts.query ??
-              '优先理解本轮输入，此前输入仅用于消解指代。只有旧经历能帮助当前回答时才查询，最多三条具体查询；无需旧事时返回空数组。返回 {"queries":["..."]}，不为闲聊强行找旧事，不编造。',
+            await auxiliaryPrompt(this.root, this.cfg, "query"),
             { text: cut(query, this.cfg.memory.queryInputTokens) },
             signal ? AbortSignal.any([signal, deadline]) : deadline,
             "query",
           );
           if (Array.isArray(r.queries))
-            q = r.queries
-              .filter((x: unknown) => typeof x === "string" && x.trim())
-              .slice(0, this.cfg.memory.queryDirections)
-              .join("\n");
+            q +=
+              "\n" +
+              r.queries
+                .filter((x: unknown) => typeof x === "string" && x.trim())
+                .slice(0, this.cfg.memory.queryDirections)
+                .join("\n");
           this.queryCache.set(query, { at: Date.now(), text: q });
           if (this.queryCache.size > 50)
             this.queryCache.delete(this.queryCache.keys().next().value!);
@@ -671,17 +672,48 @@ export class MemoryService {
       "utf8",
     );
     const result = await this.llm.json(
-      this.cfg.prompts.emotion ??
-        '判断这一轮实际经历带来的心情变化，定时提醒不是用户原话，未完成不算成功。返回 {"mood":增量,"emotions":{名称:增量},"drives":{名称:增量},"cause":"简短原因","thoughts":["念头"],"focus":["关注点"],"memory_mentions":["真正重温的候选编号"]}。允许零变化，仅作为背景的记忆不算重温。',
+      await auxiliaryPrompt(this.root, this.cfg, "emotion"),
       {
         persona: cut(persona, 1000),
         policy: {
+          scale:
+            "0–100; return point deltas, not proportions; application applies multipliers once",
+          emotionLabels: this.cfg.state.emotionLabels,
+          drives: Object.fromEntries(
+            Object.entries(this.cfg.drives).filter(([, d]) => d.enabled),
+          ),
           sensitivity: this.cfg.state.eventSensitivity,
+          moodDeltaLimit: this.cfg.state.moodDeltaLimit,
+          dimensionDeltaLimit: this.cfg.state.dimensionDeltaLimit,
           surpriseMax: this.cfg.state.surpriseMax,
           repeatedStimulusMultiplier: this.cfg.state.repeatedStimulusMultiplier,
         },
-        state,
-        input: cut(JSON.stringify(input), this.cfg.state.inputTokens),
+        state: {
+          mood: state.mood,
+          emotions: state.emotions,
+          drives: state.drives,
+          cause: state.cause,
+          assessed_at: state.assessed_at,
+          thoughts: state.thoughts,
+          focus: state.focus,
+        },
+        input: (() => {
+          const { recent_dialogue, ...current } = (input ?? {}) as Record<
+            string,
+            unknown
+          >;
+          const recent = cut(
+            String(recent_dialogue ?? ""),
+            Math.min(2000, Math.floor(this.cfg.state.inputTokens / 3)),
+          );
+          return {
+            recent_dialogue: recent,
+            current: cut(
+              JSON.stringify(current),
+              Math.max(0, this.cfg.state.inputTokens - tokens(recent)),
+            ),
+          };
+        })(),
         memories: candidates.map((x) => ({ id: x.id, summary: x.summary })),
       },
       AbortSignal.any([
@@ -690,7 +722,11 @@ export class MemoryService {
       ]),
       "emotion",
     );
+    const applied: Record<string, number> = {};
+    const ignored: string[] = [];
     await this.updateState((s) => {
+      s.assessed_at = new Date().toISOString();
+      const beforeMood = s.mood;
       const delta = (v: any, limit: number) =>
         Number.isFinite(Number(v)) ? clamp(Number(v), -limit, limit) : 0;
       s.mood = clamp(
@@ -702,12 +738,22 @@ export class MemoryService {
         0,
         100,
       );
+      applied.mood = s.mood - beforeMood;
       for (const field of ["emotions", "drives"] as const)
         for (const [k, v] of Object.entries(result[field] ?? {}).slice(0, 12)) {
-          if (field === "drives" && !this.cfg.drives[k]?.enabled) continue;
-          if (field === "emotions" && !this.cfg.state.emotionLabels.includes(k))
+          if (field === "drives" && !this.cfg.drives[k]?.enabled) {
+            ignored.push(field + "." + k);
             continue;
+          }
+          if (
+            field === "emotions" &&
+            !this.cfg.state.emotionLabels.includes(k)
+          ) {
+            ignored.push(field + "." + k);
+            continue;
+          }
           const d = field === "drives" ? this.cfg.drives[k] : undefined;
+          const before = s[field][k] ?? 0;
           s[field][k] = clamp(
             (s[field][k] ?? 0) +
               delta(
@@ -717,6 +763,7 @@ export class MemoryService {
             d?.min ?? 0,
             d?.max ?? 100,
           );
+          applied[field + "." + k] = s[field][k] - before;
         }
       if (typeof result.cause === "string")
         s.cause = result.cause.slice(0, this.cfg.state.reportChars);
@@ -734,6 +781,11 @@ export class MemoryService {
           .filter((x: any) => typeof x === "string")
           .slice(0, this.cfg.state.focusMax);
       }
+    });
+    this.db.log("info", "mood", "Emotion update applied", {
+      run_id: runId,
+      applied,
+      ignored,
     });
     const reinforce = this.indexChain.then(async () => {
       const index = await this.index();

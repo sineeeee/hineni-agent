@@ -318,7 +318,6 @@
           "type": "object",
           "properties": {
             "protocol": {
-              "default": "responses",
               "type": "string",
               "enum": [
                 "responses",
@@ -326,30 +325,24 @@
               ]
             },
             "baseUrl": {
-              "default": "https://api.openai.com/v1",
               "type": "string",
               "format": "uri"
             },
             "apiKeyEnv": {
-              "default": "OPENAI_API_KEY",
               "type": "string"
             },
             "name": {
-              "default": "gpt-4.1",
               "type": "string"
             },
             "contextWindow": {
-              "default": 1047576,
               "type": "number",
               "minimum": 100000
             },
             "maxOutput": {
-              "default": 8192,
               "type": "number",
               "minimum": 1
             },
             "reasoning": {
-              "default": "off",
               "type": "string",
               "enum": [
                 "off",
@@ -360,7 +353,6 @@
               ]
             },
             "compat": {
-              "default": {},
               "type": "object",
               "propertyNames": {
                 "type": "string"
@@ -374,7 +366,6 @@
           "type": "object",
           "properties": {
             "protocol": {
-              "default": "responses",
               "type": "string",
               "enum": [
                 "responses",
@@ -382,30 +373,24 @@
               ]
             },
             "baseUrl": {
-              "default": "https://api.openai.com/v1",
               "type": "string",
               "format": "uri"
             },
             "apiKeyEnv": {
-              "default": "OPENAI_API_KEY",
               "type": "string"
             },
             "name": {
-              "default": "gpt-4.1",
               "type": "string"
             },
             "contextWindow": {
-              "default": 1047576,
               "type": "number",
               "minimum": 100000
             },
             "maxOutput": {
-              "default": 8192,
               "type": "number",
               "minimum": 1
             },
             "reasoning": {
-              "default": "off",
               "type": "string",
               "enum": [
                 "off",
@@ -416,7 +401,6 @@
               ]
             },
             "compat": {
-              "default": {},
               "type": "object",
               "propertyNames": {
                 "type": "string"
@@ -430,7 +414,6 @@
           "type": "object",
           "properties": {
             "protocol": {
-              "default": "responses",
               "type": "string",
               "enum": [
                 "responses",
@@ -438,30 +421,24 @@
               ]
             },
             "baseUrl": {
-              "default": "https://api.openai.com/v1",
               "type": "string",
               "format": "uri"
             },
             "apiKeyEnv": {
-              "default": "OPENAI_API_KEY",
               "type": "string"
             },
             "name": {
-              "default": "gpt-4.1",
               "type": "string"
             },
             "contextWindow": {
-              "default": 1047576,
               "type": "number",
               "minimum": 100000
             },
             "maxOutput": {
-              "default": 8192,
               "type": "number",
               "minimum": 1
             },
             "reasoning": {
-              "default": "off",
               "type": "string",
               "enum": [
                 "off",
@@ -472,7 +449,6 @@
               ]
             },
             "compat": {
-              "default": {},
               "type": "object",
               "propertyNames": {
                 "type": "string"
@@ -486,7 +462,6 @@
           "type": "object",
           "properties": {
             "protocol": {
-              "default": "responses",
               "type": "string",
               "enum": [
                 "responses",
@@ -494,30 +469,24 @@
               ]
             },
             "baseUrl": {
-              "default": "https://api.openai.com/v1",
               "type": "string",
               "format": "uri"
             },
             "apiKeyEnv": {
-              "default": "OPENAI_API_KEY",
               "type": "string"
             },
             "name": {
-              "default": "gpt-4.1",
               "type": "string"
             },
             "contextWindow": {
-              "default": 1047576,
               "type": "number",
               "minimum": 100000
             },
             "maxOutput": {
-              "default": 8192,
               "type": "number",
               "minimum": 1
             },
             "reasoning": {
-              "default": "off",
               "type": "string",
               "enum": [
                 "off",
@@ -528,7 +497,54 @@
               ]
             },
             "compat": {
-              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": false
+        },
+        "spark": {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
+            "baseUrl": {
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "contextWindow": {
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
               "type": "object",
               "propertyNames": {
                 "type": "string"
@@ -597,7 +613,12 @@
         "memoryTokens": 20000,
         "stateTokens": 1000,
         "safetyTokens": 16384,
-        "trace": true
+        "trace": true,
+        "spark": false,
+        "sparkProbability": 1,
+        "sparkInputTokens": 4000,
+        "sparkTokens": 120,
+        "sparkTimeoutMs": 6000
       },
       "type": "object",
       "properties": {
@@ -624,6 +645,31 @@
         "trace": {
           "default": true,
           "type": "boolean"
+        },
+        "spark": {
+          "default": false,
+          "type": "boolean"
+        },
+        "sparkProbability": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "sparkInputTokens": {
+          "default": 4000,
+          "type": "number",
+          "minimum": 300
+        },
+        "sparkTokens": {
+          "default": 120,
+          "type": "number",
+          "minimum": 20
+        },
+        "sparkTimeoutMs": {
+          "default": 6000,
+          "type": "number",
+          "minimum": 100
         }
       },
       "required": [
@@ -631,7 +677,12 @@
         "memoryTokens",
         "stateTokens",
         "safetyTokens",
-        "trace"
+        "trace",
+        "spark",
+        "sparkProbability",
+        "sparkInputTokens",
+        "sparkTokens",
+        "sparkTimeoutMs"
       ],
       "additionalProperties": false
     },
@@ -1051,6 +1102,18 @@
           "type": "number",
           "minimum": 0
         },
+        "thoughtContextProbability": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "focusContextProbability": {
+          "default": 1,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "thoughtContextTokens": {
           "default": 300,
           "type": "number",
@@ -1129,6 +1192,8 @@
         "repeatedStimulusMultiplier",
         "reportChars",
         "thoughtContextItems",
+        "thoughtContextProbability",
+        "focusContextProbability",
         "thoughtContextTokens",
         "thoughtHalfLifeHours",
         "focusMax",
@@ -1717,7 +1782,6 @@
             "type": "object",
             "properties": {
               "protocol": {
-                "default": "responses",
                 "type": "string",
                 "enum": [
                   "responses",
@@ -1725,30 +1789,24 @@
                 ]
               },
               "baseUrl": {
-                "default": "https://api.openai.com/v1",
                 "type": "string",
                 "format": "uri"
               },
               "apiKeyEnv": {
-                "default": "OPENAI_API_KEY",
                 "type": "string"
               },
               "name": {
-                "default": "gpt-4.1",
                 "type": "string"
               },
               "contextWindow": {
-                "default": 1047576,
                 "type": "number",
                 "minimum": 100000
               },
               "maxOutput": {
-                "default": 8192,
                 "type": "number",
                 "minimum": 1
               },
               "reasoning": {
-                "default": "off",
                 "type": "string",
                 "enum": [
                   "off",
@@ -1759,7 +1817,6 @@
                 ]
               },
               "compat": {
-                "default": {},
                 "type": "object",
                 "propertyNames": {
                   "type": "string"

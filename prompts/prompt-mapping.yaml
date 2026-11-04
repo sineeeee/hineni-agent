@@ -1,0 +1,78 @@
+# 状态与时间如何表达：保存后下一轮读取，不改变评分与衰减。
+# bands.min：分数或秒数的下限，必须从0递增；缺字段继承内置默认，数组整体替换。
+# 详细字段与占位符：docs/configuration-guide.md#状态与时间映射，也可查看网页文件说明。
+mood:
+  bands:
+    - min: 0
+      text: 比较沉重
+    - min: 25
+      text: 有些低落
+    - min: 42
+      text: 平稳
+    - min: 62
+      text: 轻松、舒展
+    - min: 80
+      text: 明朗、心里有余裕
+  template: 此刻的心情底色：{label}。
+emotions:
+  min: 1
+  maxItems: 2
+  bands:
+    - min: 0
+      text: 还留有一点余韵
+    - min: 15
+      text: 隐约存在
+    - min: 40
+      text: 比较明显
+    - min: 70
+      text: 非常明显
+  item: "{name}{label}"
+  template: 其中，{items}。
+  separator: ，
+drives:
+  minDeviation: 5
+  maxItems: 2
+  stronger: 更强
+  weaker: 弱一些
+  names:
+    curiosity: 好奇
+    social: 交流意愿
+    responsibility: 责任感
+    introspection: 自省
+    missing: 惦记对方
+    closeness: 想亲近对方
+    fatigue: 疲劳
+    stress: 压力
+    joy: 愉悦倾向
+  item: "{name}比平常{direction}"
+  template: 此刻的倾向：{items}。
+  separator: ，
+gap:
+  unknown: 这里还没有此前回应的时间记录。
+  bands:
+    - min: 0
+      text: 刚刚还在交谈，可以自然接着聊。
+    - min: 60
+      text: 距离上次回应{duration}，仍可接着当前话题。
+    - min: 900
+      text: 距离上次回应{duration}，对话停了一会儿。可以自然重新开口，不必重复上一段收尾，也不假定对方的处境没变。
+    - min: 7200
+      text: 距离上次回应{duration}，已有一段间隔。把旧话题当作此前经历，按现在的时间和新输入重新接话，不假定对方还在做之前的事。
+cause:
+  enabled: true
+  unknown: 此前一轮
+  bands:
+    - min: 0
+      text: 最近一轮
+    - min: 900
+      text: 早些时候
+    - min: 7200
+      text: 此前
+  dated: "{label}（{time}）"
+  template: "{when}留下的感受缘由：{cause}。这是来历，不是当前待办，也不代表旧情境仍在继续。"
+text:
+  now: 现在是 {time}。
+  thought: 此前浮现过的念头（可放下）：{text}
+  focus: 此前关注（不是本轮指令）：{items}。新话题或时间变化时可放下。
+  focusSeparator: 、
+  spark: 突然浮起的一个小想法：{text}

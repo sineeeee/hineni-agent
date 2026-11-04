@@ -86,21 +86,21 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 
 ## 管理接口
 
-| 方法与地址                                     | 内容                                             |
-| ---------------------------------------------- | ------------------------------------------------ |
-| GET /v1/status                                 | 模型凭据存在性、渠道、活动 run、调度、需重启状态 |
-| GET /v1/agents/:agent/events?after=0&limit=100 | 按 seq 增量读原始记录，最多500条                 |
-| POST /v1/agents/:agent/cancel                  | 请求取消当前执行                                 |
-| GET /v1/agents/:agent/state                    | 当前状态快照                                     |
-| POST /v1/agents/:agent/memory/search           | `{query,limit?}` 主动查询                        |
-| POST /v1/agents/:agent/memory/reindex          | 维护检索描述与向量，可能较慢                     |
-| GET /v1/runs、/v1/deliveries、/v1/logs         | 最近运行、发送、日志                             |
-| POST /v1/deliveries/:id/retry                  | 确认后重试 failed / uncertain 投递               |
-| GET /v1/config、/v1/config/schema              | 当前配置及 schema                                |
-| PUT /v1/config                                 | `{revision,config}` 验证并保存；重启生效         |
-| GET /v1/files、/v1/file?path=...               | 可编辑文件清单、文件内容                         |
-| PUT /v1/file                                   | `{path,content}` 保存允许编辑的真实文件          |
-| POST /v1/scheduler/restart                     | `{agent_id?}`，先重读并校验磁盘配置；指定则只重启该 agent，省略重启全部                               |
+| 方法与地址                                     | 内容                                                                    |
+| ---------------------------------------------- | ----------------------------------------------------------------------- |
+| GET /v1/status                                 | 模型凭据存在性、渠道、活动 run、调度、需重启状态                        |
+| GET /v1/agents/:agent/events?after=0&limit=100 | 按 seq 增量读原始记录，最多500条                                        |
+| POST /v1/agents/:agent/cancel                  | 请求取消当前执行                                                        |
+| GET /v1/agents/:agent/state                    | 当前状态快照                                                            |
+| POST /v1/agents/:agent/memory/search           | `{query,limit?}` 主动查询                                               |
+| POST /v1/agents/:agent/memory/reindex          | 维护检索描述与向量，可能较慢                                            |
+| GET /v1/runs、/v1/deliveries、/v1/logs         | 最近运行、发送、日志                                                    |
+| POST /v1/deliveries/:id/retry                  | 确认后重试 failed / uncertain 投递                                      |
+| GET /v1/config、/v1/config/schema              | 当前配置及 schema                                                       |
+| PUT /v1/config                                 | `{revision,config}` 验证并保存；重启生效                                |
+| GET /v1/files、/v1/file?path=...               | 可编辑文件清单、文件内容                                                |
+| PUT /v1/file                                   | `{path,content}` 保存允许编辑的真实文件                                 |
+| POST /v1/scheduler/restart                     | `{agent_id?}`，先重读并校验磁盘配置；指定则只重启该 agent，省略重启全部 |
 
 错误返回 `{error}`；认证错误 401，格式或配置错误 400。协议字段采用 snake_case；配置字段采用 camelCase，二者分别验证。
 
@@ -129,3 +129,13 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 ### 记忆向量化进度
 
 `POST /v1/agents/:agent/memory/reindex` 默认继续等待维护完成；`{"background":true}` 返回 202 并后台执行。重复启动共用已有维护。`GET /v1/agents/:agent/memory/index-status` 返回 status（idle/running/completed/failed）、total、processed、ready、pending、failed、current_id、error、started_at、finished_at。进度为当前进程状态，ready/pending 由实际索引核对。两个接口均要求管理认证并限定 agent。
+
+第三到第四层的 ContextBundle.messages 使用 system/user/assistant：system 可携带本轮系统参考背景（记忆、agent自身状态、时间），user 是新输入或已标明身份的内部事件，assistant 是历史回复。独立的 context.system 保存稳定人格与执行约定。供应商格式转换留在第四层；第一、二层的事件协议不变。
+
+### 独立清理执行、上下文与日志
+
+- `DELETE /v1/agents/:agent/execution-records`：`{"mode":"selected","run_ids":["..."]}` 或 `{"mode":"all"}`。删除指定运行元数据、tool_call/tool_result/run_finished 的数据库与 JSONL 记录，以及 `history/tools/<run>/` 全目录（含 `.stdout`）。聊天输入/回复、投递记录、摘要、记忆、工作文件、上下文快照保留。
+- `DELETE /v1/agents/:agent/context-records`：相同选择格式，删除 `.runtime/requests/<run>/` 与 `.runtime/traces/<run>.json`；不删聊天、摘要或执行工具记录。全部模式也清理失去运行元数据的旧快照。上下文目录没有额外数据库正文副本。
+- 两个接口都按 agent 隔离；执行或发送中返回409，先结束再清理。选择列表不接受跨 agent 或路径片段。仍保留的快照可用文件目录恢复上下文列表，不依赖已删除的执行元数据。
+- `GET /v1/runs?agent=<id>&scope=execution|context`：执行列表只列仍有执行记录的轮次（最多100）；上下文列表按实际快照目录列出，支持独立清理后的旧快照；列表最多100轮，全部清理不受此限制。
+- `GET /v1/logs/storage` 返回数据库位置、logs表条数和时间范围。`DELETE /v1/logs` 接受 `{"mode":"before","before":"2026-01-01T00:00:00Z"}` 或 `{"mode":"all"}`；影响所有 agent 的程序日志，不影响工具、聊天或上下文。标准输出由启动器管理，不在此接口范围内。

@@ -42,7 +42,10 @@ export async function application(
         }
   }
   const scheduler = new Scheduler(config, db);
-  const runtime = new Runtime(config, db, (id) => scheduler.restart(id));
+  const runtime = new Runtime(config, db, async (id) => {
+    await scheduler.restart(id);
+    return id ? scheduler.status().agents[id] : scheduler.status();
+  });
   let server: Awaited<ReturnType<typeof servers>> | undefined;
   let closed = false;
   const close = async () => {

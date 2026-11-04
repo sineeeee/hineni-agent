@@ -1,3 +1,6 @@
+import { parsePromptMapping } from "../config/prompt-mapping.js";
+import { parseAuxiliary } from "../config/auxiliary.js";
+import { OnceTasksSchema } from "../once-tasks.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -162,6 +165,14 @@ export class AdminFiles {
           )
             throw Error("Each memory needs summary and valid occurred_at");
       }
+      if (relative.endsWith("/schedule.once.json"))
+        OnceTasksSchema.parse(JSON.parse(content));
+      if (relative.endsWith("/prompts/auxiliary.yaml")) parseAuxiliary(content);
+      if (
+        relative === "prompts/prompt-mapping.yaml" ||
+        relative.endsWith("/prompts/prompt-mapping.yaml")
+      )
+        parsePromptMapping(content);
       await atomicWrite(file, content);
       return this.read(relative);
     });

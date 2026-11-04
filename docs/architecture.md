@@ -27,7 +27,7 @@ Telegram / HTTP / 定时脚本
 | layer3    | `ContextBuilder / MemoryService / Intelligence` | 召回策略、向量存储、提示词、状态更新         |
 | layer4    | `PiExecutor / appTools / mcpTools`              | 执行底座；Runtime 可注入其他 ExecutorFactory |
 | admin     | `servers()`                                     | 管理界面与外部 HTTP 接口                     |
-| scheduler | `Scheduler` + `agents/<id>/schedule.ts`             | 触发脚本。只产生统一事件                     |
+| scheduler | `Scheduler` + `agents/<id>/schedule.ts`         | 触发脚本。只产生统一事件                     |
 
 组件在同一 Node 进程运行。调度脚本及 MCP stdio 服务是子进程。没有按渠道分开的长期 session；Pi 的临时会话只活到本次 Run 结束。
 

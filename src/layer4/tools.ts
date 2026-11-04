@@ -29,7 +29,7 @@ export interface ToolHost {
   rememberMemory?: (id: string) => void;
   silent: () => void;
   env?: NodeJS.ProcessEnv;
-  restartScheduler: () => Promise<void>;
+  restartScheduler: () => Promise<unknown>;
 }
 const result = (v: unknown) => ({
   content: [
@@ -231,11 +231,11 @@ export function appTools(h: ToolHost): AgentTool[] {
     ),
     tool(
       "restart_scheduler",
-      "修改自己的定时脚本或调度配置后，重新读取配置并只重启自己的调度进程。其他 agent 不受影响，自己的随机计时从头开始。",
+      "修改自己的 schedule.once.json、定时脚本或调度配置后，校验并重新加载自己的调度。随机计时重置，一次性任务未来继续等待、过去跳过。检查返回 status.running，关闭时不能说提醒已启用。",
       Type.Object({}),
       async () => {
-        await h.restartScheduler();
-        return { restarted: true };
+        const status = await h.restartScheduler();
+        return { reloaded: true, status: status ?? null };
       },
     ),
   ];

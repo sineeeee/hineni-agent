@@ -82,7 +82,7 @@ function cron(expression: string, job: () => Promise<void>) {
   arm();
 }
 const randomGreeting =
-  "此刻想起可以主动联系用户。请结合最近经历和心情，向用户打个自然、简短的招呼，一两句话就好；避免每次都用相同开场，不必硬找话题。这是内部定时提醒，并非用户刚发来的消息。";
+  "我想把自己感兴趣的一个小想法分享给对方。直接讲内容，让这个想法自己成立；讲完就好，不用附带对对方生活的安排或要求。对方没有发来新消息，也不用对方接话来完成这次分享。没有新内容就安静。";
 const onceIndex = process.argv.indexOf("--once");
 if (onceIndex !== -1) {
   const kind = process.argv[onceIndex + 1];
@@ -112,7 +112,7 @@ if (onceIndex !== -1) {
       if (effective.memory.reviewEnabled)
         await event(
           agent.id,
-          `现在进入每日整理时间。请阅读 personal-memory Skill，整理尚未处理的聊天经历，更新自己的 memory.json；这是一条内部提醒。每批约 ${effective.memory.reviewBatchTokens} token，最多 ${effective.memory.maxReviewItems} 条，回看 ${effective.memory.reviewOverlap} 条前文。${effective.memory.noveltyAttention ? "留意意外、变化与熟悉的小事。" : ""}${Math.random() < effective.memory.smallDetailProbability ? "这次可以额外保留最多 " + effective.memory.smallDetailMax + " 条有意思的小细节。" : ""}`,
+          `现在进入每日整理时间。请阅读 personal-memory Skill，整理尚未处理的聊天经历，更新自己的 memory.json；这是后台整理，通常安静完成；只有需要用户处理的问题才联系他，不把整理步骤发进闲聊。每批约 ${effective.memory.reviewBatchTokens} token，最多 ${effective.memory.maxReviewItems} 条，回看 ${effective.memory.reviewOverlap} 条前文。${effective.memory.noveltyAttention ? "留意意外、变化与熟悉的小事。" : ""}${Math.random() < effective.memory.smallDetailProbability ? "这次可以额外保留最多 " + effective.memory.smallDetailMax + " 条有意思的小细节。" : ""}`,
           "memory_review",
         );
     });

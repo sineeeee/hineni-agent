@@ -10,7 +10,7 @@
 
 ## 你现在先看这五项就够了
 
-你的模型密钥和 Telegram 已经接好，不需要重新填写，也不要把下面的示例覆盖到当前配置。初次调体验只看：
+先确认模型密钥和渠道状态；已连接的安装无需重填，不要用下面示例覆盖现有配置。初次调体验只看：
 
 | 顺序 | 先确认什么             | 当前位置                                                |
 | ---- | ---------------------- | ------------------------------------------------------- |
@@ -28,12 +28,12 @@ Telegram 的 Chat ID 在 **agents/<id>/config.yaml**，不是 .env：默认位�
 
 ## 先弄清四种设置
 
-| 种类           | 位置                                  | 写法与用途                                             |
-| -------------- | ------------------------------------- | ------------------------------------------------------ |
-| 凭据           | `agents/<id>/.env`（模型）或根 `.env`（连接）                                | `变量名=实际值`，例如 OPENAI_API_KEY；不放在模型名称里 |
-| 程序参数       | `agents/<id>/config.yaml` 或管理页“配置”          | 控制模型、路由、预算、开关、定时和算法                 |
-| 人格与行为文字 | persona.md、prompts/system.md、Skills | 告诉模型怎么交流、怎么完成某类任务                     |
-| 当前数据       | memory.json、state.json、history/     | 这是已经形成的记忆和经历，不是参数表                   |
+| 种类           | 位置                                          | 写法与用途                                             |
+| -------------- | --------------------------------------------- | ------------------------------------------------------ |
+| 凭据           | `agents/<id>/.env`（模型）或根 `.env`（连接） | `变量名=实际值`，例如 OPENAI_API_KEY；不放在模型名称里 |
+| 程序参数       | `agents/<id>/config.yaml` 或管理页“配置”      | 控制模型、路由、预算、开关、定时和算法                 |
+| 人格与行为文字 | persona.md、prompts/system.md、Skills         | 告诉模型怎么交流、怎么完成某类任务                     |
+| 当前数据       | memory.json、state.json、history/             | 这是已经形成的记忆和经历，不是参数表                   |
 
 不要为了修改基础心情去改 state.json：改 state.baseline 会改变今后回稳目标；state.json 记录它此刻的实际状态。修改 baseline 不会立刻把此刻心情重置为该值。
 
@@ -51,13 +51,13 @@ Telegram 的 Chat ID 在 **agents/<id>/config.yaml**，不是 .env：默认位�
 
 ### 修改后什么时候生效
 
-| 修改                                    | 生效方式                                           |
-| --------------------------------------- | -------------------------------------------------- |
-| config.yaml、.env、agent 列表、MCP 配置 | 重启主程序                                         |
-| persona.md、prompts/system.md、Skills   | 下一轮读取；已有运行保持原上下文                   |
-| memory.json                             | 下次读取/召回先同步词法内容；向量按维护策略更新    |
-| agents/<id>/schedule.ts 或个人 scheduler 参数 | 保存后单独重启该 agent 定时脚本                                   |
-| src/ 源码                               | 先 npm run build，再重启主程序；npm start 用 dist/ |
+| 修改                                          | 生效方式                                           |
+| --------------------------------------------- | -------------------------------------------------- |
+| config.yaml、.env、agent 列表、MCP 配置       | 重启主程序                                         |
+| persona.md、prompts/system.md、Skills         | 下一轮读取；已有运行保持原上下文                   |
+| memory.json                                   | 下次读取/召回先同步词法内容；向量按维护策略更新    |
+| agents/<id>/schedule.ts 或个人 scheduler 参数 | 保存后单独重启该 agent 定时脚本                    |
+| src/ 源码                                     | 先 npm run build，再重启主程序；npm start 用 dist/ |
 
 外部修改任一配置后，在网页点重新读取；保存会检测磁盘冲突。只改调度参数或脚本可单独重启该 agent 的脚本；模型、记忆等运行设置需要重启主程序。
 
@@ -94,18 +94,18 @@ models:
 
 query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆盖。修改 main 不会同时改变 fast 和 embedding。第二层压缩使用 main；记忆整理 Skill 也由主 agent 的 main 执行。
 
-| 模型字段      | 类型/默认规则               | 实际作用                                                   |
-| ------------- | --------------------------- | ---------------------------------------------------------- |
-| protocol | responses（默认）/ chat-completions | 本槽位的请求协议，保存并重启生效；向量调用忽略 |
-| baseUrl       | URL；默认 OpenAI `/v1`      | 请求端点                                                   |
-| apiKeyEnv     | 字符串；默认 OPENAI_API_KEY | 读取凭据的变量名                                           |
-| name          | 字符串                      | 服务商的精确模型 ID                                        |
-| contextWindow | 数值，schema 最少 100000    | 主模型容量预算；不是向量模型输入上限声明                   |
-| maxOutput     | 数值，至少 1                | 主调用或快模型输出上限；摘要调用另用 history.summaryTokens |
-| reasoning     | off/minimal/low/medium/high | 当前只透传到第四层 Pi 主调用                               |
-| compat        | 对象                        | 当前只透传到 Pi 的 OpenAI 适配器；键由所装 Pi 版本定义     |
+| 模型字段      | 类型/默认规则                       | 实际作用                                                   |
+| ------------- | ----------------------------------- | ---------------------------------------------------------- |
+| protocol      | responses（默认）/ chat-completions | 本槽位的请求协议，保存并重启生效；向量调用忽略             |
+| baseUrl       | URL；默认 OpenAI `/v1`              | 请求端点                                                   |
+| apiKeyEnv     | 字符串；默认 OPENAI_API_KEY         | 读取凭据的变量名                                           |
+| name          | 字符串                              | 服务商的精确模型 ID                                        |
+| contextWindow | 数值，schema 最少 100000            | 主模型容量预算；不是向量模型输入上限声明                   |
+| maxOutput     | 数值，至少 1                        | 主调用或快模型输出上限；摘要调用另用 history.summaryTokens |
+| reasoning     | off/minimal/low/medium/high         | 主对话、历史压缩和辅助请求均使用各自的档位                 |
+| compat        | 对象                                | 当前只透传到 Pi 的 OpenAI 适配器；键由所装 Pi 版本定义     |
 
-主模型、辅助模型和历史压缩均支持 Responses / Chat Completions，默认 Responses。旧配置未写 protocol 时也使用 Responses；只支持旧接口的供应商请明确选择 chat-completions。Responses 每次完整传入上下文，store:false，不使用 previous_response_id 或远端会话。辅助调用要求支持 JSON object 输出；向量调用只消费 embedding 的地址、key 和模型名，embedding.maxOutput/contextWindow/reasoning 不控制向量请求。主调用的 reasoning/compat 不会自动套用到摘要、快模型或网页搜索。
+主模型、辅助模型和历史压缩均支持 Responses / Chat Completions，默认 Responses。旧配置未写 protocol 时也使用 Responses；只支持旧接口的供应商请明确选择 chat-completions。Responses 每次完整传入上下文，store:false，不使用 previous_response_id 或远端会话。辅助调用要求支持 JSON object 输出；向量调用只消费 embedding 的地址、key 和模型名，embedding.maxOutput/contextWindow/reasoning 不控制向量请求。历史压缩使用 main.reasoning；辅助用途使用自身覆盖的 reasoning，缺省继承 fast.reasoning。Responses 传 reasoning.effort，Chat Completions 传 reasoning_effort。辅助与压缩的 off 为省略参数，服务端仍可能默认思考；只给支持此参数的模型选择其他档位。compat 仍仅由第四层 Pi 使用，网页搜索另走工具自己的调用逻辑。辅助用途只覆盖一个字段时，其余字段保留缺省并继承 fast，不会自动填入另一个默认端点。
 
 网页搜索另外调用主端点的 Responses web_search。服务商只支持 Chat Completions 时，聊天可用而 web_search 仍可能失败。
 
@@ -114,6 +114,8 @@ query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆
 改 `agents/main/persona.md` 来定义身份、个性、交流偏好。agents[].name 是系统显示名，不会自动替换人格文件中的“你叫某某”。改名字时两处一起看。
 
 `prompts/system.md` 管通用行为：如何理解外部经历、如何面对打断、怎样用工具、何时沉默、什么算完成。`agents/main/SYSTEM.md` 则是环境手册，模型按需读，不会整篇自动插入 system prompt。
+
+两份的职责分开，API角色不分开：system.md放“怎样运行和办事”，persona.md放“我是谁、怎样和你相处”，自己的环境路径放SYSTEM.md。编排用[Operating rules]和[Persona]标记后仍进入同一system消息；不用把人格挪到user消息，也不额外调用模型。只改文字时下一轮读取；运行中的那轮不变。
 
 例如希望日常更短：
 
@@ -199,7 +201,7 @@ memory:
 
 ### 召回质量与等待
 
-`queryRecentMessages=8`：取近期用户/内部事件帮助理解本轮输入，不取助手的分句回复。`queryDirections=3`：查询模型最多返回三段线索，当前实现是合成同一查询，替代原材料，而不是三条独立向量查询。
+`queryRecentMessages=8`：取近期真实用户输入帮助理解本轮输入；旧内部事件和助手的分句回复不作为用户输入。`queryDirections=3`：查询模型最多返回三段线索，当前实现是合成同一查询，替代原材料，而不是三条独立向量查询。
 
 `queryTimeoutMs=8000` 控制查询提炼，`recallTimeoutMs=8000` 是向量查询和重排各自的预算。默认如下，可以按服务速度调整：
 
@@ -370,15 +372,15 @@ routes: []
 
 通用 HTTP 入站走 HINENI_TOKEN 鉴权，携带 agent_id 直接进第二层；不会按 Telegram 的 allowedChats 自动过滤。HTTP 上传上限固定 20 MiB，不随 channel.maxFileBytes 变化。
 
-| 个人配置字段   | 作用                                                            |
-| --------------- | --------------------------------------------------------------- |
-| id/name/enabled | 稳定编号、显示名、是否参与处理                                  |
-| defaultTarget   | 内部触发默认发送位置，也作为 Telegram 接收路由                  |
-| routes          | 更多接收位置，可以加入群聊                                      |
-| targets         | 给 send_message/send_attachment/react_to_message 使用的目标别名 |
-| skills          | 额外 Skill 目录，建议绝对路径；自带 skills/ 始终另行发现        |
-| models.main     | 此 agent 的主模型设置                                       |
-| models/memory/scheduler 等 | 各组独立设置（API 的 overrides 是合并视图）                                          |
+| 个人配置字段               | 作用                                                            |
+| -------------------------- | --------------------------------------------------------------- |
+| id/name/enabled            | 稳定编号、显示名、是否参与处理                                  |
+| defaultTarget              | 内部触发默认发送位置，也作为 Telegram 接收路由                  |
+| routes                     | 更多接收位置，可以加入群聊                                      |
+| targets                    | 给 send_message/send_attachment/react_to_message 使用的目标别名 |
+| skills                     | 额外 Skill 目录，建议绝对路径；自带 skills/ 始终另行发现        |
+| models.main                | 此 agent 的主模型设置                                           |
+| models/memory/scheduler 等 | 各组独立设置（API 的 overrides 是合并视图）                     |
 
 Target 字段：channel、conversation 必填；thread 可指定话题；kind 可设 private/group。配置只验证渠道编号存在，不验证实际账号权限、聊天是否存在或渠道已启用。
 
@@ -398,7 +400,7 @@ Target 字段：channel、conversation 必填；thread 可指定话题；kind �
 | memory.enabled        | 关闭自动记忆召回；不是所有记忆相关行为的总电源                               |
 | state.enabled         | 关闭快模型心情判断及该流程中的记忆强化；上下文只保留交流间隔背景             |
 | memory.reviewEnabled  | 默认脚本不提交每日整理事件；仍先执行索引维护                                 |
-| scheduler.enabled     | 停止当前 agent 的定时脚本                                                         |
+| scheduler.enabled     | 停止当前 agent 的定时脚本                                                    |
 
 这些是编排开关，不是权限隔离开关。文件与终端工具可接触运行账户能访问的文件；多个 agent 在同一账户下也可能显式读取彼此文件。
 
@@ -433,7 +435,7 @@ prompts 里设置的是完整文字，不是文件路径；未填则使用默认
 
 | 键                | 模型输入                                     | 输出要求                                                                       |
 | ----------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| system            | 主模型的基础规则，随后还会拼人格与系统背景   | 自然回复或工具调用；默认读取当前 agent 的 prompts/system.md                                 |
+| system            | 主模型的基础规则，随后还会拼人格与系统背景   | 自然回复或工具调用；默认读取当前 agent 的 prompts/system.md                    |
 | query             | text，最近聊天截取                           | JSON：queries 字符串数组                                                       |
 | searchDescription | memory，完整记忆条目                         | JSON：search_text 字符串                                                       |
 | rerank            | query、候选 id/summary                       | JSON：ids，只返回已有编号                                                      |
@@ -482,7 +484,172 @@ Telegram 启动连接最多等待约 30 秒；无法连接时渠道标记 failed
 
 接口格式参考 [OpenAI Responses 迁移说明](https://developers.openai.com/api/docs/guides/migrate-to-responses)。协议只决定请求表达，不改变 Hineni 的四层分工。
 
-
-召回查询的 queryTimeoutMs 默认 8000；recallTimeoutMs 默认 8000，向量查询和重排分别计时。已有个人配置中的明确值继续优先，需自行保存并重启调整。queryRecentMessages 现在只参考用户输入与内部触发；本轮输入优先，助手分句不占条数。查询模型可返回空 queries 跳过旧事召回。
+召回查询的 queryTimeoutMs 默认 8000；recallTimeoutMs 默认 8000，向量查询和重排分别计时。已有个人配置中的明确值继续优先，需自行保存并重启调整。queryRecentMessages 只参考此前真实用户输入；本轮输入可为用户或内部触发，始终放在前面。旧内部触发和助手分句不占条数。查询模型可返回空 queries 跳过旧事召回。
 
 stateTokens 控制给主模型的可读状态背景，不再把 state.json 整份塞入。activation、内部 ID 和更新时间留在文件供程序计算。casualSentences/casualChars/casualParts/memoryMentions 映射成闲聊软上限，不是每次必须达到的目标。
+
+### DeepSeek 的 system 角色兼容
+
+第四层直连 `api.deepseek.com` 时，默认补 `compat.supportsDeveloperRole=false`。Pi 在推理模式下原本默认把 system 转成 developer；DeepSeek Responses 会把 developer 当 user，因此这项适配保证人格与系统规则仍作为 system 发送。其他地址不猜测供应商，代理端点需要按实际行为配置。明确配置优先，辅助 JSON/摘要本来就直接发送 system。
+
+这不改变推理档位、温度、记忆或用户提示词，也不保证表达质量；它纠正协议身份。请求快照顶层 `compat` 显示本轮生效的兼容值。保存该项后重启生效。
+
+动态参考背景使用 system 角色，用户原话继续使用 user。DeepSeek 官方端点还默认 supportsMidConvoSystemMessages=true 保留该背景的位置。可在模型 compat 中明确覆盖；其他端点使用 Pi 默认折叠行为，可能影响前缀缓存复用。此项只处理请求结构，不改记忆或状态分数。
+
+## 本轮想象灵感（可选）
+
+在“配置→上下文编排与预算”打开context.spark；其他agent默认关闭，按各自配置独立生效。它让小模型只看当前触发和人格，给主模型一条临时的想象素材，减少完全沿用旧回复的惯性。原始历史和召回依然完整走原流程。素材可能被主模型忽略，不保证每轮更热情。
+
+context.sparkInputTokens默认4000，控制辅助输入总量；sparkTokens默认120，控制解析后给主模型的文字长度；sparkTimeoutMs默认6000，超时跳过。模型与密钥页的spark继承fast，可另选模型、协议、推理和总输出额度。总输出额度要给JSON和推理留空间，不要直接填成120；main测试使用700。开关、预算和模型修改保存并重启组件，个人prompts/auxiliary.yaml的spark规则保存后下一次调用读取。实际生成的文字在上下文页“本轮想象灵感”里查看，失败日志在context分类。
+
+这是新一轮的临时创意，不更新心情、focus或长期记忆，不自动执行、不自动发送。关闭即恢复原编排，不需要删除数据。
+
+概率在个人config中单独配置：context.sparkProbability控制是否尝试生成；state.thoughtContextProbability与state.focusContextProbability控制已有候选的呈现。填写0～1，0.55即55%。数量上限0仍表示关闭；不因抽中就生成不存在的念头或待办。按一轮运行抽取，而非每段已发送文字。三项不互斥，改概率不会调整驱动力的基线、偏离量或文字程度。
+
+## 给自己设置一次提醒
+
+UI：配置 → 主动行为与定时 → 当前 Agent 一次性任务。填编号、明确日期时间和任务说明，点“加入 / 更新任务草稿”，再“保存并重启调度”。这块始终属于顶部选中的 agent，与上方公共默认/个人配置选择无关。任务的停用、编辑、删除也先改草稿，再保存重启。任务草稿不由上方“保存配置”按钮保存。
+
+真实文件是 `agents/<id>/schedule.once.json`：
+
+```json
+{
+  "tasks": [
+    {
+      "id": "morning-wakeup",
+      "enabled": true,
+      "at": "2030-01-02T08:00:00+08:00",
+      "text": "按用户此前委托，提醒他起床。这是内部定时提醒。"
+    }
+  ]
+}
+```
+
+示例日期必须改为真实目标日期；时区用 `+08:00` 或 `Z` 明确表示。每项 id 唯一。同一个 id 和同一绝对时刻产生稳定事件编号，进入第二层时去重。改成另一个时刻则是新事件。
+
+保存到这份文件即可，不需要同时改 config 和脚本。`scheduler.enabled` 以及 agent 启用状态仍是总开关。已有 cron、随机策略继续写个人 `schedule.ts`；一次性任务由宿主 Scheduler 与该脚本共同启停，更换自定义脚本不会要求你重新实现一次性任务支持。
+
+重启调度先校验任务文件；文件格式错误则保留正在运行的计时。未来任务按原绝对时刻继续等待，已经过期的跳过，不补跑，不持久化“执行到哪里”。进程离线、渠道失败或模型选择沉默都可能导致没有通知；提交失败只记录日志，不自动重试。UI 的“时间已过”不是“已送达”。停用/删除并重启可以取消尚未触发的任务，已经入第二层的事件不撤回。
+
+到期：Scheduler → POST `/v1/events`（internal_event）→ 第二层记录与轮询 → 第三层编排 → 第四层执行 → 原有发送队列。默认发送到 agent.defaultTarget。没有额外的任务执行模型或第二条发送通道。
+
+Agent 通过 system-operations Skill 编辑同一文件，调用 restart_scheduler，再核对工具成功和任务内容。明天/今天有歧义先确认日期；明确委托给本人发提醒，不需要再审批普通提醒文案。当前并未自动补建之前失败的提醒。
+
+## 小模型的规则放哪里
+
+每个 agent 的 `prompts/auxiliary.yaml` 可在“文件与文档 → 提示词与小模型”编辑，也可从配置的心情、驱动力、表达风格、提示词分组直接打开。保存后下次实际调用读取，不需要重启。各键分别是：
+
+| 键                | 什么时候使用                               | 输出约定                                                               |
+| ----------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
+| summary           | 历史达到压缩条件或紧急压缩时               | summary 字符串，非空且不超过保留预算                                   |
+| spark             | 本轮灵感抽中且有输入时                     | spark 字符串，可为空                                                   |
+| query             | 当前输入需要召回，且没有有效查询缓存时     | queries 数组；追加到原始检索材料，空数组仍检索原材料                   |
+| searchDescription | 后台为缺少检索描述的记忆生成描述           | search_text 字符串                                                     |
+| rerank            | 自动召回后有多条候选、且重排开启时         | ids 数组，只能列已有候选                                               |
+| emotion           | 第四层整轮结束，已有文字、工具或主动沉默时 | mood、emotions、drives 的增量，cause、thoughts、focus、memory_mentions |
+| stateExpression   | 每次第三层拼当前状态后                     | 直接提供主模型的解释，不调用小模型                                     |
+
+优先级：有效 config 的 `prompts.<键>` 覆盖 → 个人 auxiliary.yaml → 内置默认。若文件改了没效果，先查同名配置覆盖。root/prompts/auxiliary.yaml 是新建模板，不会覆盖已有个人文件。查询缓存未到期不重算；已有记忆检索描述不因改提示词立即重写。模型选择仍在 models.query/maintenance/rerank/emotion，缺省继承 models.fast；超时、裁切和算法数值仍在配置中。
+
+UI 保存会校验 YAML 键名与文本类型。缺省键用默认；空字符串或未知键拒绝保存。直接用工具写文件绕过网页校验时，读取发现格式错误会报错或走该功能已有的失败回退，不会悄悄接受错误规则。
+
+## 情绪怎么计算、怎么调
+
+默认情绪提示词明确按 0–100 分制返回“增减分数”，不返回最终总分、不自行乘倍率。轻微感受参考 ±1–2，明显触动 ±3–6，强烈事件 ±7–10，无影响可为0。这是可编辑的评分指导，不是程序强制每轮涨分。
+
+policy 自动提供允许的 emotionLabels、启用的 drives、敏感度和程序限幅。模型返回的未知情绪/驱动力名称不会应用。最终仍遵循：先随时间回落 → 模型增量乘倍率 → 每轮限幅 → 限制最终范围 → 保存 state.json。日志的 mood / Emotion update applied 显示每项实际加减与忽略名称，便于核查；不包含输入正文或私密念头。
+
+| 想调什么                    | 配置位置                     | 当前默认与效果                                    |
+| --------------------------- | ---------------------------- | ------------------------------------------------- |
+| 总体对经历敏感些            | state.eventSensitivity       | 1；影响整体心情和普通情绪，不代替 drives 各自倍率 |
+| 整体心情每次最多变化多少    | state.moodDeltaLimit         | 3；这是上限，不是每轮固定加3                      |
+| 情绪/驱动力每次最多变化多少 | state.dimensionDeltaLimit    | 5；统一限制每项增量                               |
+| 当下情绪散得慢些            | state.emotionHalfLifeMinutes | 90；越大消退越慢                                  |
+| 整体心情回稳慢些            | state.moodHalfLifeHours      | 12；向 state.baseline 回落                        |
+| 亲近冲动更容易被带动        | drives.closeness.sensitivity | 1；仍受 dimensionDeltaLimit 限制                  |
+| 有感受时表达明显些          | style.emotionExpression      | 0.35；改变主模型指导，不修改状态分数              |
+| 正事中收住感受的程度        | style.restraint              | 0.6；影响表达取舍，不要求闲聊冷淡                 |
+
+这些数值仍需“保存并重启”才能更新运行组件。本次没有替用户修改敏感度、限幅、半衰期或风格数值。
+
+整体心情是慢变化底色，单项情绪是短时感受。closeness 表示此刻想亲近，missing 表示此刻惦记，不是长期关系分数。关系背景来自人格和记忆，不能由一次低分否定。主模型看到自然描述、带时间的缘由与 stateExpression，完整数值保存在 state.json；当前输入可以立刻改变反应，不需要等下一次后台评分。
+
+风格映射继续用 0.34 / 0.67 两个分界。emotionExpression 依次指导简短具体反应、自然接话、明显流露；restraint 依次指导直接流露、按场景适度收住、正事优先但不冷淡。UI 的“查看当前草稿生成的实际表达提示词”使用与运行时相同的函数。没有新增情境分类 API，也没有硬编码回复台词。
+
+## 念头、关注和灵感的概率
+
+每次构建一轮上下文时，context.sparkProbability、state.thoughtContextProbability、state.focusContextProbability分别独立抽取，取值0～1。工具循环和发送分句不重复抽。数量上限0仍关闭该项，候选为空不补内容。
+
+灵感未抽中就不调用spark模型。thought/focus候选由第四层结束后的emotion请求产生，概率只决定下一轮是否呈现，不删除候选、不改变任务执行。当前main个人设置为55%/15%/20%，各最多一条，这是个人调试值，不是通用最优值；其他agent按各自有效配置运行。
+
+包装文字编辑个人prompts/prompt-mapping.yaml的text.spark/text.thought/text.focus；生成规则编辑auxiliary.yaml的spark/emotion。配置概率保存并重启组件，文件文字下一轮读取。
+
+## 状态与时间映射
+
+每个 agent 使用自己的 `agents/<id>/prompts/prompt-mapping.yaml`。网页：配置 → 心情与状态 / 驱动力 / 表达风格 → **编辑状态与时间映射**；也可在“文件与文档 → 提示词与小模型”找到。编辑器上方提供字段说明。保存后下一轮读取，不需要重启。已经开始的一轮不变。
+
+这份文件决定**分数、间隔怎样写成给主模型看的话**。它不改评分、不写 state.json、不增加模型调用。完整数字仍在状态文件；实际输出看“上下文”。state.enabled、state.gap 和上下文预算继续生效。
+
+### 文件分工
+
+| 文件                          | 用途                                                              |
+| ----------------------------- | ----------------------------------------------------------------- |
+| config.yaml                   | 评分敏感度、增量上限、衰减、模型与风格数值                        |
+| prompts/prompt-mapping.yaml   | 状态分档阈值、展示数量、中文名称、句子模板                        |
+| prompts/auxiliary.yaml        | 小模型如何评分、检索；stateExpression补充解释这些状态如何影响表达 |
+| prompts/system.md、persona.md | 通用行为、工作汇报、人格和关系背景                                |
+| schedule.ts                   | 主动招呼的触发文案和时间规则；修改后重启调度                      |
+
+项目根 `prompts/prompt-mapping.yaml` 只是创建个人文件时的模板；已有个人文件不会被覆盖。个人文件缺字段用**代码内置默认**，不是动态继承根模板。填写 `{}` 恢复全部内置默认；删去一项恢复该项默认。列表整体替换，不能只写想改的一档。
+
+### 每一项怎样改
+
+所有 `bands` 都是从小到大的分档列表。`min` 是进入该档的下限（包含），必须第一档为0、后续严格递增。达到多个下限时用最高一档。每张表最多20档。心情和情绪的min是0–100分；间隔和缘由的min是秒，最多一年。
+
+| 部分     | 字段与效果                                                                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| mood     | `bands`：心情先四舍五入再分档；`template`用`{label}`插入该档说法                                                                                                                                                   |
+| emotions | `min`最低展示分数；`maxItems`最多显示几项，0隐藏；按分数从高到低选。`bands`是强度措辞，`item`用`{name}`、`{label}`；`separator`连接各项，`template`用`{items}`组成整句                                             |
+| drives   | `minDeviation`偏离自身baseline至少多少分才展示，按偏离幅度排序；`maxItems`控制数量，0隐藏。`names`映射中文名称；`stronger/weaker`是比较词；`item`用`{name}`、`{direction}`，`template`用`{items}`，`separator`连接 |
+| gap      | `bands`按交流间隔秒数分档；text可用`{duration}`，程序显示不足1分钟、约几分钟/小时/天。`unknown`用于没有上次回应时间的情况。时间仍由第二层按同一目标上一段回复提交计算                                              |
+| cause    | `enabled`是否展示旧缘由；`bands`按距离assessed_at的秒数分档；`dated`用`{label}`、`{time}`；没有评分时间用`unknown`；`template`用`{when}`、`{cause}`                                                                |
+| text     | `now`用`{time}`显示本地日期/时段；`thought`用`{text}`显示念头；`focus`用`{items}`显示关注，`focusSeparator`连接。念头数量和裁切仍由原有state配置控制                                                               |
+
+字符串必须非空，最多4000字符。maxItems为0–20整数。仅替换模板中上述占位符，不执行代码。未知占位符、字段名或无效分档在网页保存时拒绝，原文件保持不变；直接写文件产生错误时，下一轮会明确报错，不会静默猜测。可用文档里的字段名查错。
+
+### 示例：只改两项
+
+```yaml
+emotions:
+  maxItems: 3
+  bands:
+    - min: 0
+      text: 还留有一点余韵
+    - min: 10
+      text: 有些明显
+    - min: 40
+      text: 很明显
+    - min: 75
+      text: 非常强烈
+cause:
+  enabled: false
+```
+
+这会最多展示三种情绪，10分开始用“有些明显”，并隐藏旧缘由。其他设置继续用内置默认；不会提高情绪本身的分数。
+
+默认值沿用上一版：心情25/42/62/80分档，情绪至少1分取两项、15/40/70分档；驱动力偏离5分取两项；间隔60/900/7200秒分档。修改后可以直接在下一轮“上下文”核对，不必猜网页说明是否等于自己的配置。
+
+### 开发入口
+
+`src/config/prompt-mapping.ts` 集中定义默认值、严格校验、缺项合并与文件读取；`src/layer3/state-context.ts` 负责渲染；`ContextBuilder` 每轮读个人文件。对象逐字段补缺，列表整体替换，无跨agent缓存。初始化和新建agent只补缺文件；网页仍走现有文件读写与版本冲突校验。无需新增接口或修改四层协议。
+
+### 调整建议
+
+先只动表达，保持评分算法和记忆召回不变，方便比较：
+
+- 仍反复提旧道歉或旧任务时，可先设 `cause.enabled: false`，看是否是缘由描述过强；念头/关注仍可能保留旧内容，可分别通过原有state配置和此文件模板调整。
+- 情绪数字仍低时，先保持maxItems为2，适当降低bands中“隐约/明显”的门槛测试，不要把1分写成强烈情绪。改映射只改变措辞，不提高分数。
+- 想要短但更有感情，调整config的style.emotionExpression（例如0.6）或auxiliary.stateExpression，而非一味加大闲聊长度。config仍需保存并重启。
+- 时间间隔提示写成允许重新开口，避免写成必须换话题或假定对方已经发生新事情。
+
+本文件覆盖状态段的主要映射，不覆盖所有prompt：style表达档位的文本仍由style-prompt.ts生成，通用规则在system.md，状态补充指导在auxiliary.yaml，主动触发文案在schedule.ts。
