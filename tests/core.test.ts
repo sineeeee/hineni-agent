@@ -4479,3 +4479,94 @@ test("summary configuration survives disk reload and stays independent of main a
     /压缩模型上下文容量/,
   );
 });
+
+test("tool activity keeps typing through overlapping tools and closes on run failure", async (t) => {
+  const f = await fixture(t);
+  let opened = 0,
+    closed = 0;
+  const runtime = new Runtime(
+    f.config,
+    f.db,
+    async () => {},
+    llm,
+    (_h, _l, record) => ({
+      run: async (req) => {
+        for (const tool of ["a", "b"])
+          record({
+            event_id: `${req.runId}:call:${tool}`,
+            type: "tool_call",
+            run_id: req.runId,
+          });
+        assert.equal(opened, 1);
+        record({
+          event_id: `${req.runId}:result:a`,
+          type: "tool_result",
+          run_id: req.runId,
+        });
+        assert.equal(closed, 0);
+        record({
+          event_id: `${req.runId}:result:b`,
+          type: "tool_result",
+          run_id: req.runId,
+        });
+        assert.equal(closed, 1);
+        record({
+          event_id: `${req.runId}:call:c`,
+          type: "tool_call",
+          run_id: req.runId,
+        });
+        assert.equal(opened, 2);
+        throw Error("tool interrupted before result");
+      },
+    }),
+  );
+  runtime.registry.startTyping = (target) => {
+    assert.equal(target.conversation, "owner");
+    opened++;
+    return () => {
+      closed++;
+    };
+  };
+  await runtime.start();
+  f.cleanup.push(() => runtime.stop());
+  runtime.ingress(event("typing"));
+  runtime.tick();
+  await wait(() => opened === 2 && runtime.status().active.length === 0);
+  assert.equal(closed, 2);
+});
+
+test("typing abort stops refresh and failures never reject the run", async (t) => {
+  const f = await fixture(t);
+  const registry = new ChannelRegistry(
+    f.config.current,
+    f.db,
+    () => f.root,
+    () => {},
+  );
+  let calls = 0;
+  registry.channels.set("local", {
+    id: "local",
+    send: async () => ({}),
+    typing: async () => {
+      calls++;
+      throw Error("offline");
+    },
+  });
+  const controller = new AbortController();
+  const stop = registry.startTyping(
+    { channel: "local", conversation: "owner" },
+    controller.signal,
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(calls, 1);
+  controller.abort();
+  stop();
+  await new Promise((r) => setTimeout(r, 4100));
+  assert.equal(calls, 1);
+  registry.startTyping(
+    { channel: "local", conversation: "owner" },
+    controller.signal,
+  );
+  assert.equal(calls, 1);
+  await registry.stop();
+});

@@ -258,7 +258,7 @@ maxToolChars|当前工具循环返回模型的结果字符上限，过长留开�
 );
 rows(
   "delivery",
-  `typing|Telegram 发送过程中展示 typing/upload_photo，并定期刷新；不在模型刚开始思考时全程显示。
+  `typing|Telegram 工具执行时刷新 typing，结束、取消或整轮退出后停止；发送时仍展示 typing/upload_photo。纯模型思考不显示。
 initialDelayMs|Telegram 每个待发送部分之前的固定延迟；不是按字符模拟打字。
 partIntervalMs|串行队列每部分成功后等待的时间；增加会延迟其他渠道和 agent 的队列。
 split|platform 按平台长度，paragraph 按段，sentence 按句进一步拆分；无法合并第四层已交付的句块。

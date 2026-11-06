@@ -401,7 +401,7 @@ transformContext 在每次请求前估计消息体 token；超过窗口减输出
 
 新输入清理：Store.purgeUnsent 只处理同一 agent 与目标的 handed_off=0 任务，删除队列及事件索引，并重写对应 JSONL，清掉运行结果中的正文副本和相关请求/编排快照。已交接的失败或重试任务不删除；工具记录及其文件保留。若摘要覆盖了被删记录，则清空摘要检查点，下一轮从剩余原文重新构建。临时 prune-outbox ID 清单保证退出中断的删除可在启动时完成，完成即清除。管理时间线的 history_revision 变化会丢弃旧页面缓存，避免把删除内容重新拼回来。
 
-Telegram 开启 typing 时每 4 秒更新状态，发送完成停止；第一段在实际发送前才显示 typing，不是在模型刚开始思考时。send_attachment 复制稳定文件后再上传，原 workspace 文件之后改变不影响队列中副本。
+Telegram 开启 delivery.typing 时，工具执行和实际投递期间每4秒刷新状态。Runtime根据第四层tool_call/tool_result记录维护本轮尚未结束的工具集合，经Channel的可选typing方法显示；并行工具都结束、取消或整轮退出后停止刷新。纯模型思考不显示。状态不进第二层记录或发送队列，失败不影响工具；平台可在最后一次刷新后约5秒内自行消失。send_attachment 复制稳定文件后再上传，原 workspace 文件之后改变不影响队列中副本。
 
 Webhook 出站 POST 自有协议，带 Idempotency-Key=<delivery.id>:<part_index> 和可选 Bearer。接收方应自行去重；系统不能保证跨网络 exactly-once。发送返回 queued、模型 run complete、delivery sent 是三种不同阶段。
 

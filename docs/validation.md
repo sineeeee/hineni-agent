@@ -126,3 +126,13 @@ main实际60条事实向量及60条感受向量均完成，失败0；完整重�
 当前 main agent 的压缩模型实际参数在变更前只读留存，经 revision 校验原样写入根及个人 summary 配置，并读回逐字段对比一致；未变更其他模型参数。此前没有显式 summary 的其他安装若升级，也需将旧实际压缩参数填入 summary，否则采用 summary 自身出厂默认值，不再动态继承 main。
 
 类型检查、构建、文档生成与全量 116 项测试通过。前端模拟 DOM 验证配置tab直接编辑→保存→模型tab读到相同值→再修改→保存重启入口→配置tab读回，并验证改变 main/fast 名称不影响 summary。磁盘保存重读与模型请求测试验证独立 endpoint、key、协议、输出和思考配置。此前配置tab的摘要仅为可选覆盖，未填写时不显示的问题随完整模型schema一并解决。
+
+### 2026-11-06：工具 typing、摸鱼直接阅读与表达说明
+
+- `npm run check`、`npm run build`、118项完整测试通过。新增测试覆盖同时运行两项工具时保持typing、全部结束时停止、工具异常退出收尾、取消后停止刷新与渠道错误隔离；未发送真实Telegram测试消息，重启后渠道ready。
+- dice测试覆盖避重、只读preview、返回URL及博客槽；main公开博客和九个现有来源以Node fetch +浏览器User-Agent实测均HTTP200，返回JSON/RSS/Atom。只证明当前本机入口可读，不保证网站持续可用或文章全文可读。
+- 删除模板与main的fetch.py；保留历史抓取产物，不再使用或更新。模板博客默认关闭，main填写并启用自己的公开博客。图墙和定时参数保留。
+- system与四个Skills的模板/main副本更新，借鉴humanizer-zh的具体细节、少空泛评价和少固定收尾。未做付费聊天评测，不能据此声称人格效果提升。现有persona未改。
+- Skill官方quick_validate因本机Python缺PyYAML未运行成功；使用项目已有YAML解析器检查8份Skill的frontmatter和名称，dice真实preview运行通过。
+
+- 随后按用户要求撤回梦境Skill本次三处措辞修改，main和模板均恢复原文；其他修改保留。

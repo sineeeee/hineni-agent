@@ -16,8 +16,6 @@ BASE = Path(__file__).resolve().parent.parent
 RULES = {'sourceCountMin': 2,
  'sourceCountMax': 3,
  'avoidRecentRolls': 1,
- 'itemsPerSource': 4,
- 'requestTimeoutSeconds': 10,
  'sources': {'d': {'name': 'Hacker News',
                    'enabled': True,
                    'kind': 'hn',
@@ -35,10 +33,6 @@ RULES = {'sourceCountMin': 2,
                    'note': '公开Atom订阅',
                    'kind': 'rss',
                    'url': 'https://www.producthunt.com/feed'},
-             'm': {'name': 'Bluesky 热门',
-                   'enabled': True,
-                   'kind': 'bluesky',
-                   'url': 'https://public.api.bsky.app/xrpc/app.bsky.feed.getFeed?feed=at%3A%2F%2Fdid%3Aplc%3Az72i7hdynmk6r22z27h6tvur%2Fapp.bsky.feed.generator%2Fwhats-hot&limit=20'},
              'n': {'name': 'Tildes',
                    'enabled': True,
                    'note': '公开Atom订阅',
@@ -53,10 +47,17 @@ RULES = {'sourceCountMin': 2,
                    'enabled': True,
                    'kind': 'rss',
                    'url': 'https://www.thisiscolossal.com/feed/'},
-             'q': {'name': 'Neatorama',
+             's': {'name': '少数派',
                    'enabled': True,
+                   'note': '公开RSS订阅',
                    'kind': 'rss',
-                   'url': 'https://www.neatorama.com/feed/'}}}
+                   'url': 'https://sspai.com/feed'},
+             'z': {'name': 'Solidot',
+                   'enabled': True,
+                   'note': '公开RSS订阅',
+                   'kind': 'rss',
+                   'url': 'https://www.solidot.org/index.rss'},
+             'blog': {'name': '主人的博客（填写自己的公开地址后启用）', 'enabled': False, 'kind': 'wordpress', 'url': ''}}}
 
 
 def atomic_json(file, value):
@@ -105,7 +106,7 @@ def decide(cfg, state, rng):
     keys = choose_sources(cfg, state, rng)
     state["recent_sources"] = (state.get("recent_sources", []) + [keys])[-10:]
     state["rolls"] = state.get("rolls", 0) + 1
-    return {"sources": [{"id": key, "name": cfg["sources"][key]["name"]} for key in keys]}
+    return {"sources": [{"id": key, **cfg["sources"][key]} for key in keys]}
 
 
 def main():

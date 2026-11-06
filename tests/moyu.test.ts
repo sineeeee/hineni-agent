@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 
 const run = promisify(execFile);
-test("Skill dice selects sources only and preview stays read-only; readers preserve scope", async () => {
+test("Skill dice returns readable source URLs and preview stays read-only", async () => {
   const { stdout } = await run(
     "python3",
     [
@@ -14,7 +14,7 @@ test("Skill dice selects sources only and preview stays read-only; readers prese
 import sys,tempfile,shutil,json,random,subprocess
 from pathlib import Path
 sys.path.insert(0,str(Path(sys.argv[1])/"scripts"))
-import dice,fetch
+import dice
 with tempfile.TemporaryDirectory() as folder:
  b=Path(folder)
  shutil.copytree(sys.argv[1],b,dirs_exist_ok=True)
@@ -27,15 +27,11 @@ with tempfile.TemporaryDirectory() as folder:
  before=(b/'state.json').read_bytes()
  subprocess.run([sys.executable,str(b/'scripts/dice.py'),'preview'],check=True,capture_output=True)
  assert (b/'state.json').read_bytes()==before
- assert fetch.parse_feed('p',b'<rss><channel><item><title>test</title><link>https://example.com/a</link><description>summary</description></item></channel></rss>')[0]['content_scope']=='feed_excerpt'
- assert fetch.parse_feed('p',b'<rss><channel><item><title>test</title><link>https://example.com/a</link></item></channel></rss>')[0]['content_scope']=='title_only'
- assert all(x['kind'] in {'rss','hn','lobsters','v2ex','bluesky'} for x in cfg['sources'].values())
- assert 'browser' not in cfg
- success=fetch.run(['h'],b,lambda *args: json.dumps([{'title':'real title','url':'https://example.com/post','content':'real excerpt'}]).encode())
- assert success['sources'][0]['items'][0]['excerpt']=='real excerpt'
- failure=fetch.run(['d','p'],b,lambda *args: (_ for _ in ()).throw(ValueError('offline')))
- assert all(s['status']=='fail' and s['items']==[] for s in failure['sources'])
- assert (b/'last-edition.json').exists()
+ assert all(x['url'].startswith('https://') and x['kind'] for x in first['sources'])
+ assert not (b/'scripts/fetch.py').exists()
+ assert cfg['sources']['blog']['enabled'] is False
+ cfg['sources']={'blog':{'name':'blog','enabled':True,'kind':'wordpress','url':'https://example.com/feed/'}}
+ assert dice.decide(cfg,{},rng)['sources'][0]['url']=='https://example.com/feed/'
 print('passed')
 `,
       path.resolve("templates/skills/moyu"),

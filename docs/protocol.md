@@ -68,6 +68,8 @@ Delivery = {
 
 第二层在首次调用 Channel.send 前设置持久化 handed_off 标记；从这一刻起整条 Delivery 不因新输入被取消，包括后续 parts 和重试。标记只属于队列存储，不增加协议字段。
 
+第一层可选实现 `Channel.typing(target)`，仅发临时活动状态，不产生事件、投递记录或新推理。第二层根据第四层的工具记录开始/停止刷新，仍由 `delivery.typing` 控制。
+
 第一层实现 `Channel.send(delivery, part)`，返回可选平台 message_id。它负责平台长度限制、分句、typing、延迟、上传。每个 part 成功后才推进队列位置。
 
 Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Idempotency-Key: delivery.id:part_index`；若配置 secretEnv，带对应 Bearer token。接收方应按该键去重。省略 URL 的 webhook channel 是本地收件箱，可在控制台查看。网络超时 / 平台服务端错误视为 uncertain；通过控制台确认后再重试。

@@ -151,7 +151,7 @@ export const fieldHelp: Record<string, Record<string, string>> = {
     maxToolChars: "本轮交给模型的单条工具结果字符上限，完整记录保留",
   },
   delivery: {
-    typing: "发送时展示正在输入",
+    typing: "工具执行和发送时展示正在输入",
     initialDelayMs: "发送每段前延迟（毫秒）",
     partIntervalMs: "消息部分之间的间隔（毫秒）",
     split: "按平台长度、段落或句子拆分",

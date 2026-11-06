@@ -86,6 +86,7 @@ export interface Channel {
     delivery: Delivery,
     part: Part | undefined,
   ): Promise<{ message_id?: string; raw?: unknown }>;
+  typing?(target: Target): Promise<void>;
   start?(): Promise<void>;
   stop?(): Promise<void>;
 }

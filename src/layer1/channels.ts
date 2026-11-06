@@ -93,6 +93,13 @@ export class ChannelRegistry {
       });
       const channel: Channel = {
         id: c.id,
+        typing: async (target) => {
+          await bot.api.sendChatAction(
+            target.conversation,
+            "typing",
+            target.thread ? { message_thread_id: Number(target.thread) } : {},
+          );
+        },
         send: async (d, p) => {
           const owner = this.cfg.agents.find((a) => a.id === d.agent_id);
           const cfg = owner ? agentConfig(this.cfg, owner) : this.cfg;
@@ -334,6 +341,38 @@ export class ChannelRegistry {
           : `附件获取失败：${a.name}；${a.error}`,
       data: { attachment_id: a.id },
     });
+  }
+  /** Best-effort activity, scoped to one run; never enters history or the outbox. */
+  startTyping(target: Target, signal: AbortSignal): () => void {
+    const channel = this.channels.get(target.channel);
+    if (!channel?.typing || signal.aborted || this.lifecycle.signal.aborted)
+      return () => {};
+    let stopped = false,
+      pending = false;
+    const show = async () => {
+      if (stopped || pending) return;
+      pending = true;
+      try {
+        await channel.typing!(target);
+      } catch {
+        /* Status must not fail a tool. */
+      } finally {
+        pending = false;
+      }
+    };
+    const timer = setInterval(() => void show(), 4000);
+    timer.unref();
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      signal.removeEventListener("abort", stop);
+      this.lifecycle.signal.removeEventListener("abort", stop);
+    };
+    signal.addEventListener("abort", stop, { once: true });
+    this.lifecycle.signal.addEventListener("abort", stop, { once: true });
+    void show();
+    return stop;
   }
   async shareAttachment(from: string, to: string, ref: string) {
     const original = this.db.getAttachment(from, ref);

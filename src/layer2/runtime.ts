@@ -213,8 +213,10 @@ export class Runtime {
       Math.min(2000, Math.floor(cfg.state.inputTokens / 3)),
     );
     let chunk = 0;
-    const record = (e: any) =>
-      this.db.append({
+    const activeTools = new Set<string>();
+    let stopTyping: (() => void) | undefined;
+    const record = (e: any) => {
+      const saved = this.db.append({
         protocol_version: 1,
         agent_id: a.id,
         source: "layer4",
@@ -222,6 +224,23 @@ export class Runtime {
         data: {},
         ...e,
       });
+      if (cfg.delivery.typing && context) {
+        if (e.type === "tool_call") {
+          activeTools.add(e.event_id.replace(`${runId}:call:`, ""));
+          stopTyping ??= this.registry.startTyping(
+            context.target,
+            signalWithTimeout,
+          );
+        } else if (e.type === "tool_result") {
+          activeTools.delete(e.event_id.replace(`${runId}:result:`, ""));
+          if (!activeTools.size) {
+            stopTyping?.();
+            stopTyping = undefined;
+          }
+        }
+      }
+      return saved;
+    };
     try {
       context = await new ContextBuilder(
         this.db,
@@ -285,6 +304,7 @@ export class Runtime {
         error: errorText(e),
       };
     } finally {
+      stopTyping?.();
       result ??= {
         reason: "error",
         text: "",

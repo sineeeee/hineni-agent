@@ -12,8 +12,8 @@ function baseDescription(p: string) {
     return make(
       "skills",
       name === "SKILL.md" ? "摸鱼与分享" : name,
-      "摸鱼Skill：SKILL.md说明如何浏览和分享，选站规则和来源直接写在scripts/dice.py，scripts/fetch.py读取公开API/RSS。state.json和抓取日志不代表已经发送。",
-      "Skill和配套脚本修改后下一次使用生效。间隔、活跃时段、总开关、概率和每日上限在个人config.yaml的scheduler，修改后重启定时脚本。仅需Python标准库，无登录或浏览器依赖。",
+      "摸鱼Skill：SKILL.md说明如何浏览和分享，选站规则和来源直接写在scripts/dice.py，模型按Skill用web_read或bash读取公开网页/API/RSS。state.json只记抽站，不代表已经发送。",
+      "Skill和配套脚本修改后下一次使用生效。间隔、活跃时段、总开关、概率和每日上限在个人config.yaml的scheduler，修改后重启定时脚本。骰子只需Python标准库；浏览使用已有web_read或bash/curl，无登录或浏览器依赖。",
       /\.(pyc|log|lock)$/.test(p) ||
         ["state.json", "last-edition.json", "fetch-log.jsonl"].includes(name),
     );
@@ -370,7 +370,7 @@ export function describeFile(p: string) {
       base.effect,
       [
         "个人schedule.ts按自己config.yaml的scheduler选摸鱼、纯聊或安静，不执行Skill脚本。",
-        "摸鱼事件只给SKILL.md路径和浏览意愿；主agent读取Skill，再运行dice.py选站和fetch.py读取，工具结果照常记录，分享或沉默由主agent决定。",
+        "摸鱼事件只给SKILL.md路径和浏览意愿；主agent读取Skill，再运行dice.py选站，用web_read或bash读取，工具结果照常记录，分享或沉默由主agent决定。",
         "只读公开API/RSS，规则随Skill脚本提供；没有浏览器、账号管理和额外后台服务。",
       ],
       {},
