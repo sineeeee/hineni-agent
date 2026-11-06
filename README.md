@@ -4,7 +4,7 @@
 
 **完整文档入口：[Hineni 完整手册](docs/manual.md)**。先读它了解整体，再按需要看 [配置指南](docs/configuration-guide.md)、[内部流程与算法](docs/internals.md)、[全部参数](docs/config.md)。
 
-当前这台机器的安装摘要见 [开始使用.md](开始使用.md)。
+每台机器自己的安装摘要可以写在根目录 `开始使用.md`。该文件被忽略，不会进入仓库。
 
 自主管理经历、记忆和人格的个人 agent。一个程序，四个可替换组件；Telegram / Webhook 是前端，Pi 是执行器。
 

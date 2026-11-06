@@ -893,8 +893,8 @@ Score = R × (0.50 + 0.15A + 0.15I + 0.05F + 0.05E + 0.10B)
 
 ### 5.14. 参考与后续范围
 
-- [personal-memory Skill](local/Documents/code/Hineni/personal-memory/SKILL.md)：保留第一人称经历、小事和感受，是本方案的记忆主体。
-- [原讨论 talk.txt](local/Documents/code/Hineni/talk.txt)：借鉴多路检索、预算和表达分工，按本轮最新取舍收敛。
+- 早期 personal-memory Skill 草稿（仓库外的本地笔记）：保留第一人称经历、小事和感受，是本方案的记忆主体。
+- 早期讨论记录（仓库外的本地笔记）：借鉴多路检索、预算和表达分工，按本轮最新取舍收敛。
 - [鱼的记忆](https://github.com/Yuuyuko-uu/dsh-fish-memory/blob/main/lib/index.js)：检索词、衰减和再次记忆时的强化。我们的短期激活另行设计。
 - [鱼的心情](https://github.com/Yuuyuko-uu/dsh-feiyu-mood/blob/main/lib/index.js)：事件影响、限幅和回稳。源码与说明中的默认值可能不同，本稿采用可调初值。
 - [澜的提示词](https://github.com/kiefeng/dsh-lan-memory/blob/main/lib/defaults.js)：具体短对话样例、简短表达、可省略的状态侧写。

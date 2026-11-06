@@ -7,7 +7,7 @@
 - 理解整体：读 [架构](docs/architecture.md)；面向用户的说明在 [完整手册](docs/manual.md)。
 - 改文件位置、配置、密钥或定时任务：先读 [Agent 文件归属与继承](docs/agent-layout.md)。
 - 改层间对象、事件方向或外部接口：先读 [协议](docs/protocol.md) 和 [类型定义](src/contracts/index.ts)。
-- 排错：先确定 agent_id、run_id、目标渠道及实际配置，再按功能定位。实现和测试用于确认当前行为；[设计背景](docs/design-reference.md) 是历史讨论，[开始使用](开始使用.md) 是本机安装说明，不能当作所有安装的状态。
+- 排错：先确定 agent_id、run_id、目标渠道及实际配置，再按功能定位。实现和测试用于确认当前行为；[设计背景](docs/design-reference.md) 是历史讨论。根目录 `开始使用.md` 若存在，只是本机安装说明，不进入版本库，不能当作所有安装的状态。
 
 ## 按功能找文档和代码
 

@@ -108,7 +108,7 @@ function baseDescription(p: string) {
     );
   const docs: Record<string, [string, string]> = {
     "README.md": ["项目入口", "项目简介、启动方式和文档链接。"],
-    "开始使用.md": ["开始使用", "首次启动与连接的操作步骤。"],
+    "开始使用.md": ["开始使用", "本机安装摘要。不进入版本库，不能代表其他安装。"],
     "manual.md": ["完整手册", "四层职责、模型分工、数据位置与阅读入口。"],
     "console.md": [
       "网页操作指南",
