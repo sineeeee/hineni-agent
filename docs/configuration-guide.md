@@ -81,6 +81,19 @@ models:
 
 如果新服务用独立密钥，可以在 `agents/<id>/.env` 增加 `MAIN_MODEL_KEY=实际值`，再让 models.main.apiKeyEnv 写 `MAIN_MODEL_KEY`。apiKeyEnv 填的是变量名，不是 key 本身。程序启动时加载 `.env`；已有进程环境变量通常优先于 dotenv 文件。
 
+### 单独配置压缩模型
+
+“模型与密钥”中新增“压缩模型”，可在公共默认值或当前 agent 范围设置模型、地址、密钥变量、协议、上下文容量、输出上限和思考强度，保存并重启后生效。
+
+```yaml
+models:
+  summary:
+    reasoning: off
+    # name、baseUrl、apiKeyEnv、contextWindow、maxOutput 均在 summary 独立配置
+```
+
+main、fast、summary 平行独立，互不继承。summary 思考缺省为 off；明确设置 low/high 等才开启。DeepSeek 的 off 会转成协议明确支持的 none。`history.summaryTokens` 是最终摘要保留上限，`models.summary.maxOutput` 是生成额度；上下文容量用于既有分批预算，不改变压缩触发与近期原文保留规则。恢复继承会删除该角色的个人覆盖项，公共 summary 默认配置仍有效。
+
 ### 单独换心情或查询模型
 
 ```yaml
@@ -92,7 +105,7 @@ models:
     name: gpt-4.1-mini
 ```
 
-query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆盖。修改 main 不会同时改变 fast 和 embedding。第二层压缩使用 main；记忆整理 Skill 也由主 agent 的 main 执行。
+query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆盖。修改 main 不会同时改变 fast 和 embedding。第二层压缩使用 summary，独立配置且思考默认 off；记忆整理 Skill 也由主 agent 的 main 执行。
 
 | 模型字段      | 类型/默认规则                       | 实际作用                                                   |
 | ------------- | ----------------------------------- | ---------------------------------------------------------- |
@@ -105,7 +118,7 @@ query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆
 | reasoning     | off/minimal/low/medium/high         | 主对话、历史压缩和辅助请求均使用各自的档位                 |
 | compat        | 对象                                | 当前只透传到 Pi 的 OpenAI 适配器；键由所装 Pi 版本定义     |
 
-主模型、辅助模型和历史压缩均支持 Responses / Chat Completions，默认 Responses。旧配置未写 protocol 时也使用 Responses；只支持旧接口的供应商请明确选择 chat-completions。Responses 每次完整传入上下文，store:false，不使用 previous_response_id 或远端会话。辅助调用要求支持 JSON object 输出；向量调用只消费 embedding 的地址、key 和模型名，embedding.maxOutput/contextWindow/reasoning 不控制向量请求。历史压缩使用 main.reasoning；辅助用途使用自身覆盖的 reasoning，缺省继承 fast.reasoning。Responses 传 reasoning.effort，Chat Completions 传 reasoning_effort。辅助与压缩的 off 为省略参数，服务端仍可能默认思考；只给支持此参数的模型选择其他档位。compat 仍仅由第四层 Pi 使用，网页搜索另走工具自己的调用逻辑。辅助用途只覆盖一个字段时，其余字段保留缺省并继承 fast，不会自动填入另一个默认端点。
+主模型、辅助模型和历史压缩均支持 Responses / Chat Completions，默认 Responses。旧配置未写 protocol 时也使用 Responses；只支持旧接口的供应商请明确选择 chat-completions。Responses 每次完整传入上下文，store:false，不使用 previous_response_id 或远端会话。辅助调用要求支持 JSON object 输出；向量调用只消费 embedding 的地址、key 和模型名，embedding.maxOutput/contextWindow/reasoning 不控制向量请求。历史压缩使用 summary.reasoning，缺省 off；辅助用途使用自身覆盖的 reasoning，缺省继承 fast.reasoning。Responses 传 reasoning.effort，Chat Completions 传 reasoning_effort。DeepSeek 压缩的 off 显式发送 none；其他 off 为省略参数，服务端仍可能默认思考；只给支持此参数的模型选择其他档位。compat 仍仅由第四层 Pi 使用，网页搜索另走工具自己的调用逻辑。辅助用途只覆盖一个字段时，其余字段保留缺省并继承 fast，不会自动填入另一个默认端点。
 
 网页搜索另外调用主端点的 Responses web_search。服务商只支持 Chat Completions 时，聊天可用而 web_search 仍可能失败。
 
@@ -114,6 +127,8 @@ query、maintenance、emotion、rerank 会继承 fast，只有写出的字段覆
 改 `agents/main/persona.md` 来定义身份、个性、交流偏好。agents[].name 是系统显示名，不会自动替换人格文件中的“你叫某某”。改名字时两处一起看。
 
 `prompts/system.md` 管通用行为：如何理解外部经历、如何面对打断、怎样用工具、何时沉默、什么算完成。`agents/main/SYSTEM.md` 则是环境手册，模型按需读，不会整篇自动插入 system prompt。
+
+工作表达规则也写在prompts/system.md：接任务、讲进展和交付时继续使用persona里的身份与习惯，语言自然；复杂交付按需要展开，角色动作与真实执行分清。代写的邮件正文按收件人与用途选择语气。此项没有新增数值开关，修改提示词后下一轮生效。
 
 两份的职责分开，API角色不分开：system.md放“怎样运行和办事”，persona.md放“我是谁、怎样和你相处”，自己的环境路径放SYSTEM.md。编排用[Operating rules]和[Persona]标记后仍进入同一system消息；不用把人格挪到user消息，也不额外调用模型。只改文字时下一轮读取；运行中的那轮不变。
 
@@ -500,6 +515,7 @@ stateTokens 控制给主模型的可读状态背景，不再把 state.json 整�
 
 在“配置→上下文编排与预算”打开context.spark；其他agent默认关闭，按各自配置独立生效。它让小模型只看当前触发和人格，给主模型一条临时的想象素材，减少完全沿用旧回复的惯性。原始历史和召回依然完整走原流程。素材可能被主模型忽略，不保证每轮更热情。
 
+
 context.sparkInputTokens默认4000，控制辅助输入总量；sparkTokens默认120，控制解析后给主模型的文字长度；sparkTimeoutMs默认6000，超时跳过。模型与密钥页的spark继承fast，可另选模型、协议、推理和总输出额度。总输出额度要给JSON和推理留空间，不要直接填成120；main测试使用700。开关、预算和模型修改保存并重启组件，个人prompts/auxiliary.yaml的spark规则保存后下一次调用读取。实际生成的文字在上下文页“本轮想象灵感”里查看，失败日志在context分类。
 
 这是新一轮的临时创意，不更新心情、focus或长期记忆，不自动执行、不自动发送。关闭即恢复原编排，不需要删除数据。
@@ -653,3 +669,35 @@ cause:
 - 时间间隔提示写成允许重新开口，避免写成必须换话题或假定对方已经发生新事情。
 
 本文件覆盖状态段的主要映射，不覆盖所有prompt：style表达档位的文本仍由style-prompt.ts生成，通用规则在system.md，状态补充指导在auxiliary.yaml，主动触发文案在schedule.ts。
+
+
+## 事实与感受两种记忆入口
+
+记忆原文仍只有个人 `memory.json`。同一ID的检索索引新增 `feelingText/feelingVectors`；原 `text/vectors/description` 为事实入口（summary、details、people、agent_name）。检索描述模型只接收这些事实字段。感受入口直接使用 `emotion.labels + emotion.feeling`，不包含当前state，不再生成一份记忆或额外感受摘要。旧条目没有这些字段时跳过感受索引，不补造感受。
+
+自动召回时，原事实query照常运行；同时用同一份本轮输入及近期用户发言生成感受query，不传人格、心情、thoughts或focus。规则为个人 `prompts/auxiliary.yaml` 的 `feelingQuery`，返回 `feeling_query` 字符串；空值或失败就只走事实侧。共用models.query、queryTimeoutMs、queryCacheSeconds，感受缓存独立。工具memory_search保持事实搜索。
+
+两侧分别计算文字/向量相关性、各过门槛。同一ID合并一次，相关分取两侧RRF分中的较大值，不因双路命中额外加分；然后统一乘现有强度、重要性、激活、熟悉度和情绪联系倍率，候选与检索选中数量按feelingShare分配，两侧默认各半；重复ID只占一个名额，不足由另一侧补足。再结合重排、相似去重、时间邻居、随机联想与总预算。当前情绪仍可通过原rankWeights.emotion参与排序，但不参与生成感受query。maxItems和后续参数不增加第二份额度。
+
+新增配置（个人config.yaml的memory，保存并重启生效）：
+
+| 配置 | 默认 | 作用 |
+|---|---|---|
+| feelingShare | 0.5 | 感受侧候选与召回名额占比，事实侧占剩余比例；缺额补足 |
+| feelingRecall | true | 自动召回启用感受入口；关闭不删除已有索引 |
+| feelingInputTokens | 1800 | 感受query输入上限；材料来自现有queryInputTokens流程 |
+| feelingQueryTokens | 160 | 生成后保留的感受查询长度 |
+| feelingVectorThreshold | 0.25 | 感受侧语义门槛；词法有重合也可进入候选 |
+
+首次升级需在记忆向量化入口运行一次索引维护；原混合来源的描述失效重建，保留强度、重温次数和真实记忆。之后只重建内容变化的一侧，换向量模型则两侧重建。失败的一侧可退回文字搜索。索引仍存同一数据库key与 `.runtime/search-index.json`。正常定时维护继续处理两侧。记忆页显示两侧文本、向量数量、试算命中路线与感受query；试算不写原文、索引或状态。
+
+设计参考LivingMemory的多路检索合并原则；其原版是文档与图谱双路，并非本实现的事实与感受双向量：[架构说明](https://github.com/lxfight-s-Astrbot-Plugins/astrbot_plugin_livingmemory/blob/master/docs/architecture.md)。
+
+
+### 记忆条目与索引维护
+
+所有操作集中在记忆页。新增和编辑使用单条JSON编辑器：保存原文到个人memory.json，保留文件其他条目与顶层字段；版本变化时拒绝旧页面覆盖，需刷新后重试。“只保存”立即同步文字索引并清除内容变化侧的旧向量；“保存并补齐向量”还启动后台模型调用，只补未就绪条目。已有维护任务运行时，保存后的补齐请求排到随后执行。删除条目会同时移除JSON原文、SQLite索引、search-index.json副本中的两侧内容和向量，以及该ID的短期激活/联想计数；历史聊天、旧上下文请求和已发送消息保留。
+
+“补齐缺失向量”复用未变部分；“重建事实侧/感受侧/两侧”强制重做选定侧，事实侧同时重新生成检索描述。详情里可只重建这一条。重建保留原始记忆、强度和重温次数，维护中拒绝重叠的手动重建；进度和错误直接显示在记忆页。没有labels/feeling的条目没有感受向量，不为凑数生成情绪。
+
+main本次明确覆盖memory.maxItems=8、candidates=24、detailsItems=4、feelingShare=0.5；公共默认条数保持原值。8条是检索阶段的名额，时间邻居可能替换其中条目，随机联想仍可额外一条，最终Prompt还受原有token预算限制。不会为了凑各半召回不相关的条目。

@@ -18,6 +18,61 @@ export function memoryRoutes(app: FastifyInstance, runtime: Runtime) {
     (req) => memory(req.params.agent).inspectMemories(req.query.id),
   );
   app.post<{ Params: { agent: string } }>(
+    "/v1/agents/:agent/memory/entries",
+    async (req) => {
+      const b = z
+        .object({
+          version: z.string().min(1),
+          entry: z.record(z.string(), z.unknown()),
+          rebuild: z.boolean().default(false),
+        })
+        .strict()
+        .parse(req.body);
+      return memory(req.params.agent).changeMemory(
+        "create",
+        b.version,
+        b.entry,
+        undefined,
+        b.rebuild,
+      );
+    },
+  );
+  app.put<{ Params: { agent: string; id: string } }>(
+    "/v1/agents/:agent/memory/entries/:id",
+    async (req) => {
+      const b = z
+        .object({
+          version: z.string().min(1),
+          entry: z.record(z.string(), z.unknown()),
+          rebuild: z.boolean().default(false),
+        })
+        .strict()
+        .parse(req.body);
+      return memory(req.params.agent).changeMemory(
+        "update",
+        b.version,
+        b.entry,
+        req.params.id,
+        b.rebuild,
+      );
+    },
+  );
+  app.delete<{ Params: { agent: string; id: string } }>(
+    "/v1/agents/:agent/memory/entries/:id",
+    async (req) => {
+      const b = z
+        .object({ version: z.string().min(1) })
+        .strict()
+        .parse(req.body);
+      return memory(req.params.agent).changeMemory(
+        "delete",
+        b.version,
+        undefined,
+        req.params.id,
+      );
+    },
+  );
+  app.post<{ Params: { agent: string } }>(
     "/v1/agents/:agent/memory/simulate",
     async (req, reply) => {
       const body = z

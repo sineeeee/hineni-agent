@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import {
   agentConfig,
+  summaryModelConfig,
   type Config,
   type AgentConfig,
 } from "../config/schema.js";
@@ -32,12 +33,27 @@ export type ExecutorFactory = (
   llm: Intelligence,
   record: (e: any) => void,
 ) => Executor;
+export interface HistoryCompaction {
+  id: string;
+  status: "running" | "completed" | "failed" | "cancelled" | "skipped";
+  started_at: string;
+  finished_at?: string;
+  duration_ms?: number;
+  completed_batches: number;
+  before_tokens: number;
+  after_tokens?: number;
+  target_tokens: number;
+  summary_tokens: number;
+  summary?: string;
+  error?: string;
+}
 export class Runtime {
   readonly cfg: Config;
   readonly registry: ChannelRegistry;
   readonly outbox: Outbox;
   readonly memories = new Map<string, MemoryService>();
   readonly environments = new Map<string, NodeJS.ProcessEnv>();
+  private compactions = new Map<string, HistoryCompaction>();
   private pollAt = new Map<string, number>();
   private maintenanceAt = new Map<string, number>();
   private active = new Map<
@@ -381,6 +397,84 @@ export class Runtime {
       this.maintenanceBusy = false;
     }
   }
+  /** Latest manual operation, separate from conversational runs; resets on service restart. */
+  historyCompaction(agent: string) {
+    return this.compactions.get(agent) ?? null;
+  }
+  /** Reuse history compaction and the existing active slot, so incoming events cancel safely. */
+  compactHistory(agent: string) {
+    const a = this.cfg.agents.find((a) => a.id === agent && a.enabled);
+    if (!a || this.stopping) throw Error("Unknown, disabled or stopping agent");
+    if (
+      this.active.has(agent) ||
+      this.db.pending(agent).length ||
+      this.outbox.isSending(agent)
+    )
+      throw Object.assign(
+        Error("当前 agent 正在执行、等待回复或发送；请空闲后再压缩。"),
+        { statusCode: 409 },
+      );
+    const cfg = agentConfig(this.cfg, a);
+    const llm =
+      this.llm instanceof OpenAIModels
+        ? new OpenAIModels(
+            cfg,
+            this.environments.get(agent),
+            this.agentRoot(agent),
+          )
+        : this.llm;
+    const history = new History(this.db, cfg, llm);
+    const before = history.inspect(agent);
+    const controller = new AbortController();
+    const job: HistoryCompaction = {
+      id: id(),
+      status: "running",
+      started_at: new Date().toISOString(),
+      completed_batches: 0,
+      before_tokens: before.estimated_tokens,
+      target_tokens: cfg.history.targetTokens,
+      summary_tokens: cfg.history.summaryTokens,
+    };
+    this.compactions.set(agent, job);
+    const promise = history
+      .view(agent, controller.signal, undefined, new Set(), {
+        onBatch: (completed) => {
+          job.completed_batches = completed;
+        },
+      })
+      .then(() => {
+        const after = history.inspect(agent);
+        job.status = after.through === before.through ? "skipped" : "completed";
+        job.after_tokens = after.estimated_tokens;
+        job.summary = after.summary;
+      })
+      .catch((error) => {
+        job.status = controller.signal.aborted ? "cancelled" : "failed";
+        job.error = errorText(error);
+      })
+      .finally(() => {
+        job.finished_at = new Date().toISOString();
+        job.duration_ms = Date.now() - Date.parse(job.started_at);
+        this.db.log(
+          job.status === "failed" ? "warn" : "info",
+          "history",
+          "Manual compaction " + job.status,
+          {
+            agent,
+            operation_id: job.id,
+            completed_batches: job.completed_batches,
+            before_tokens: job.before_tokens,
+            after_tokens: job.after_tokens,
+            duration_ms: job.duration_ms,
+            error: job.error,
+          },
+        );
+        this.active.delete(agent);
+        if (!this.stopping) this.tick();
+      });
+    this.active.set(agent, { controller, promise, runId: job.id });
+    return job;
+  }
   cancel(agent: string) {
     this.active.get(agent)?.controller.abort(new Error("User cancellation"));
     return { cancelled: !!this.active.get(agent) };
@@ -412,7 +506,10 @@ export class Runtime {
         return [
           a.id,
           Object.fromEntries(
-            Object.entries(cfg.models).map(([k, m]) => [
+            Object.entries({
+              ...cfg.models,
+              summary: summaryModelConfig(cfg),
+            }).map(([k, m]) => [
               k,
               {
                 name: m?.name ?? cfg.models.fast.name,

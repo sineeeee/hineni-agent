@@ -10,7 +10,7 @@ import random
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
-from dice import BASE, atomic_json, locked, read_config
+from dice import BASE, atomic_json, locked, RULES
 
 
 class PlainText(HTMLParser):
@@ -126,7 +126,7 @@ def collect(key, source, cfg, reader=request):
 
 
 def run(keys, base=BASE, reader=request):
-    cfg = read_config(base)
+    cfg = RULES
     if not keys or len(keys) > 8 or len(set(keys)) != len(keys):
         raise ValueError("Pass 1–8 distinct source codes from dice.py")
     for key in keys:

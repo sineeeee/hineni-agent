@@ -27,7 +27,7 @@ const stages: Record<string, ProcessingGuide> = {
   model: {
     steps: [
       "先由 agentConfig 合并该 agent 的有效模型配置。主模型交给 PiExecutor；query、maintenance、emotion、rerank、spark 分别把自己的字段覆盖在 fast 上；embedding 单独使用向量模型。",
-      "每个模型槽位通过 protocol 选择 Responses 或 Chat Completions。主模型由 Pi 转换工具和消息；辅助模型发送用途指令与本次材料，要求 JSON；摘要沿用主模型协议，向量模型始终走 embeddings。Responses 设置 store:false，每次完整传入编排材料，不接远端会话。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。",
+      "每个模型槽位通过 protocol 选择 Responses 或 Chat Completions。主模型由 Pi 转换工具和消息；辅助模型发送用途指令与本次材料，要求 JSON；摘要使用 summary 模型协议，向量模型始终走 embeddings。Responses 设置 store:false，每次完整传入编排材料，不接远端会话。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。",
       "模型设置不由运行结果回写。辅助结果由记忆或心情模块接收，影响本轮回忆或下一轮状态。",
     ],
     code: [
@@ -40,7 +40,7 @@ const stages: Record<string, ProcessingGuide> = {
     steps: [
       "ContextBuilder.build 调用 History.view：从数据库的 history:<agent_id> 读取已压缩到哪个事件（through）和累计摘要（summary），再读取 through 之后的事件。投递确认和 run_finished 不加入这份历史。",
       "History.render 保留事件时间、来源、发言人、正文和附件说明；旧工具结果只取末尾 toolTailTokens。估算“旧摘要＋剩余原文”的 token 数。",
-      "超过 triggerTokens 时，从最新内容往前尽量留出 targetTokens−summaryTokens 的原文空间，其余较早事件分批交给 main 模型总结，输入同时包含旧摘要和最终摘要 token 预算；请求总输出额度取 summaryTokens 与 models.main.maxOutput 的较大值，避免推理先耗尽摘要额度。只接受完整 JSON 和未超过保留预算的摘要；不完整或超限不推进检查点。总结成功后把新的 through/summary 写回数据库；原始 JSONL 不改。",
+      "超过 triggerTokens 时，从最新内容往前尽量留出 targetTokens−summaryTokens 的原文空间，其余较早事件分批交给 summary 模型总结，输入同时包含旧摘要和最终摘要 token 预算；请求总输出额度取 summaryTokens 与 models.summary.maxOutput 的较大值，避免推理先耗尽摘要额度。只接受完整 JSON 和未超过保留预算的摘要；超长或格式错误最多重写三次，仍失败不推进检查点。总结成功后把新的 through/summary 写回数据库；原始 JSONL 不改。",
       "最后把累计摘要和保留原文交给第三层，以摘要消息和原有user/assistant消息排列在动态背景之前。下一轮从新 through 接续，而不是再总结全部历史。",
     ],
     code: [
@@ -146,7 +146,7 @@ const stages: Record<string, ProcessingGuide> = {
   scheduler: {
     steps: [
       "Scheduler 为每个启用的 agent 启动自己的脚本进程；读取其独立 config.yaml，安排自己的每日维护、做梦和随机机会。脚本带 agent_id 向同一个 /v1/events 提交事件。",
-      "随机等待分钟数=min+Math.random()×(max−min)；到期按 timezone 算当前小时，只有 activeStart≤小时<activeEnd 才向 /v1/events 发 internal_event。然后重新抽下一段等待。",
+      "随机等待分钟数=min+Math.random()×(max−min)；到期按 timezone 算当前小时，只有 activeStart≤小时<activeEnd 才检查leisureDailyLimit并按moyuWeight/chatWeight/quietWeight抽签。安静不提交事件；摸鱼只提供Skill路径，纯聊提供randomGreeting；然后重新抽下一段等待。",
       "内部事件带基础提示文字，进入第二层普通触发流程，再经过第三层和第四层；模型可选择沉默。参数不是每秒回写的状态；重启脚本会重新抽时间，不保存下次触发点或补跑错过事件。",
     ],
     code: [
@@ -228,7 +228,7 @@ const query: ProcessingGuide = {
 const maintenance: ProcessingGuide = {
   steps: [
     "sync(false) 读 memory.json，按条目内容和向量模型签名检查变化，更新搜索用的文字副本。原文变化或向量模型变化会使相应旧描述/向量失效，但仅修改分片参数不会重做已有向量。",
-    "sync(true) 按 maintenanceBatchItems 分批、批内逐条处理缺少向量的记忆。searchDescription 开启且还没描述时，给 maintenance 模型完整条目，取 search_text 的前 descriptionTokens。",
+    "sync(true) 按 maintenanceBatchItems 分批维护缺少向量的条目。事实检索描述只给summary/details/people/agent_name，不给emotion；感受侧直接切片labels+feeling，不调用描述模型。两侧保存在同一索引对象，原文不复制成两条记忆。",
     "把“检索描述＋原记忆文字”按 chunkTokens 和 chunkOverlap 切片，再调用 embedding；一批最多 20 个片段。单条受 maintenanceTimeoutMs 限制，成功结果写入 .runtime/search-index.json；失败记日志，保留 memory.json。",
     "daily 由定时脚本调用；debounced 由后台每 pollSeconds 检查文件修改时间，静置超过 debounceSeconds 后调用。自带每日维护在 debounced 模式仍会执行。",
   ],
@@ -263,6 +263,18 @@ const reinforcement: ProcessingGuide = {
 };
 export function processingGuide(key: string): ProcessingGuide {
   const [group, field] = key.split(".");
+  if (group === "memory" && field.startsWith("feeling"))
+    return {
+      steps: [
+        "本轮输入与近期用户发言生成感受query，与事实query并行；不传state或人格。规则在prompts/auxiliary.yaml的feelingQuery。",
+        "对labels+feeling索引计算文字与向量相关性。两路各过门槛，同ID合并取较高RRF分，候选及选中数量按feelingShare分配名额，不足可补；再按原状态倍率、重排、去重、时间邻居和预算截取。情绪权重仍是原有排序因素，不用于生成感受query。",
+        "失败或空query只跳过感受路线；旧索引升级后需要一次向量化，未就绪先用文字检索。试算使用隔离快照，不改变索引或激活。",
+      ],
+      code: [
+        "src/layer3/memory.ts · feelingQuery / search / sync",
+        "src/layer3/memory-ranking.ts · synchronizeMemoryIndex",
+      ],
+    };
   if (group === "memory") {
     if (/^query/.test(field)) return query;
     if (

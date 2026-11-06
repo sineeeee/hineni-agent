@@ -207,7 +207,35 @@ export async function contextPreview(
       embeddingInputTokens: 1000,
     },
   );
-  const embedCall = calls.find((c) => c.purpose === "embedding");
+  const feelingCall = calls.find((c) => c.purpose === "feelingQuery");
+  add(
+    "feeling-query",
+    "输入与检索",
+    "感受查询：独立线索",
+    feelingCall?.error ? "回退" : feelingCall ? "辅助模型" : "跳过",
+    feelingCall ? pretty(feelingCall) : "未调用感受模型（关闭或没有记忆）。",
+    material,
+    "仅从本轮与近期用户输入提取感受线索；本试算省略历史。不传当前情绪、人格、thoughts或focus。返回空或失败就跳过；感受query单独搜索labels+feeling，合并ID后统一排序。",
+    {
+      enabled: cfg.memory.feelingRecall,
+      inputTokens: cfg.memory.feelingInputTokens,
+      queryTokens: cfg.memory.feelingQueryTokens,
+      threshold: cfg.memory.feelingVectorThreshold,
+      query: trace.query.feeling,
+    },
+  );
+  const embedCalls = calls.filter((c) => c.purpose === "embedding");
+  const embedCall = embedCalls.length
+    ? {
+        input: embedCalls.map((c) => c.input),
+        output: embedCalls.map((c) => c.output),
+        error:
+          embedCalls
+            .map((c) => c.error)
+            .filter(Boolean)
+            .join("; ") || undefined,
+      }
+    : undefined;
   add(
     "embedding",
     "输入与检索",
@@ -235,7 +263,7 @@ export async function contextPreview(
     "中间资料",
     pretty(entries),
     embedCall?.output ?? trace.query.expanded,
-    "先过相关性门槛：有文字重合，或语义相似度超过门槛。把文字与语义的**名次**融合，再乘状态倍率；倍率是基础底分加五项贡献，不是六种记忆。\n\n每条的factors含自然强度、重要性、短期激活、熟悉度、情绪联系及contributions；initial_score是重排前分数。只有候选名额内的条目才继续。这里是计算资料，不会整份送给主模型。\n\n计算方式：重要性归一值=(importance−1)/4；半衰期H=baseHalfLifeDays×(1+importanceMultiplier×归一重要性)；剩余强度=保存强度×2^(−过去天数/H)；激活=2^(−过去分钟数/activationHalfLifeMinutes)；熟悉度=1−exp(−重温次数/5)。情绪联系取名称匹配的当前情绪最大值÷100，再按记忆发生至今的天数衰减。\n\n融合相关分=1/(rrfK+文字名次)+1/(rrfK+语义名次)；initial_score=融合相关分×各contributions之和。",
+    "先过相关性门槛：有文字重合，或语义相似度超过门槛。把文字与语义的**名次**融合，再乘状态倍率；倍率是基础底分加五项贡献，不是六种记忆。\n\n每条的factors含自然强度、重要性、短期激活、熟悉度、情绪联系及contributions；initial_score是重排前分数。只有候选名额内的条目才继续。这里是计算资料，不会整份送给主模型。\n\n计算方式：重要性归一值=(importance−1)/4；半衰期H=baseHalfLifeDays×(1+importanceMultiplier×归一重要性)；剩余强度=保存强度×2^(−过去天数/H)；激活=2^(−过去分钟数/activationHalfLifeMinutes)；熟悉度=1−exp(−重温次数/5)。情绪联系取名称匹配的当前情绪最大值÷100，再按记忆发生至今的天数衰减。\n\n每侧融合相关分=1/(rrfK+该侧文字名次)+1/(rrfK+该侧语义名次)；两侧各过门槛，同ID取较高相关分，再乘各contributions之和。matched_routes标明命中事实、感受或两侧。候选池与选中条数按feelingShare分名额，同ID只占一个名额，一侧不足由另一侧补足；allocated_route说明占用了哪侧名额。后续时间联系和预算可能再改变组成。",
     {
       "memory.vectorThreshold": cfg.memory.vectorThreshold,
       "memory.rrfK": cfg.memory.rrfK,
@@ -262,6 +290,8 @@ export async function contextPreview(
     "重排模型只看查询、候选编号和概括，返回偏好顺序，在现有分数上最多额外加25%。随后逐条选入；每选一条就降低与它概括太相似的剩余条目分数，直到名额用完。\n\n重排超时或失败继续用原排名。selected_score是被选中时经过相似惩罚的分数，search_rank是这一步的名次，还不是最后送入Prompt的顺序。",
     {
       "memory.rerank": cfg.memory.rerank,
+      "memory.feelingShare": cfg.memory.feelingShare,
+      retrieval_quotas: trace.search?.quotas,
       "memory.maxItems": cfg.memory.maxItems,
       "memory.diversityPenalty": cfg.memory.diversityPenalty,
       "memory.recallTimeoutMs": cfg.memory.recallTimeoutMs,

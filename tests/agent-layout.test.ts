@@ -542,6 +542,8 @@ test("manual leisure submits one normal internal event without changing automati
     recursive: true,
     filter: (p) => !p.includes("__pycache__"),
   });
+  // Scheduler must not run any Skill script.
+  await fs.rm(path.join(dir, "scripts"), { recursive: true });
   const received: any[] = [];
   const server = http.createServer(async (req, res) => {
     let body = "";
@@ -585,9 +587,9 @@ test("manual leisure submits one normal internal event without changing automati
       (s) => s.name === "moyu" && s.file === path.join(dir, "SKILL.md"),
     ),
   );
-  assert.match(received[0].body.text, /fetch\.py/);
-  const state = JSON.parse(
-    await fs.readFile(path.join(dir, "state.json"), "utf8"),
+  assert.doesNotMatch(received[0].body.text, /fetch\.py/);
+  await assert.rejects(fs.access(path.join(dir, "state.json")));
+  await assert.rejects(
+    fs.access(path.join(root, "agents/main/.runtime/leisure-state.json")),
   );
-  assert.equal(state.opportunities, 0);
 });

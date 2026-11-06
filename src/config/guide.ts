@@ -8,11 +8,11 @@ export const configurationGuide: Record<
     scope: "全局；保存配置并重启服务。",
   },
   model: {
-    flow: "主模型负责聊天、工具循环和历史压缩；fast 是五类辅助 JSON 调用的默认模型；embedding 只产生记忆向量。模型列表由接口地址和对应 key 获取，不代表列表中所有模型都支持当前任务。",
+    flow: "主模型负责聊天和工具循环；summary 独立负责历史压缩，默认关闭思考；fast 是五类辅助 JSON 调用的默认模型；embedding 只产生记忆向量。模型列表由接口地址和对应 key 获取，不代表列表中所有模型都支持当前任务。",
     scope: "全局默认，可在 agent 的 main 或 models 覆盖；保存并重启。",
   },
   history: {
-    flow: "第二层从旧摘要检查点接上后续原文；工具结果只取尾部进入历史视图。超过阈值才调用 main 批量压缩较早部分。压缩不改原始 JSONL；新输入取消未交接回复时会删除对应原文。",
+    flow: "第二层从旧摘要检查点接上后续原文；工具结果只取尾部进入历史视图。超过阈值才调用 summary 批量压缩较早部分。压缩不改原始 JSONL；新输入取消未交接回复时会删除对应原文。",
     scope: "历史预算和 pollMs 均按当前 agent 生效。保存并重启。",
   },
   context: {
@@ -68,7 +68,7 @@ export const configurationGuide: Record<
     scope: "每个 agent 有自己的 MCP 清单、环境和开关；保存并重启。",
   },
   prompts: {
-    flow: "支持 system、query、searchDescription、rerank、emotion、spark、stateExpression。system 覆盖个人 system.md；其他覆盖个人 auxiliary.yaml 同名规则。stateExpression 直接解释主模型状态；辅助调用须保留所要求的 JSON 字段。",
+    flow: "支持 system、query、feelingQuery、searchDescription、rerank、emotion、spark、stateExpression。system 覆盖个人 system.md；其他覆盖个人 auxiliary.yaml 同名规则。stateExpression 直接解释主模型状态；辅助调用须保留所要求的 JSON 字段。",
     scope:
       "可按 agent 覆盖；配置中的覆盖保存并重启。删除键恢复文件或代码内默认提示词。",
   },
@@ -99,20 +99,20 @@ tokenEnv|管理口令的环境变量名；实际值在 .env，至少 24 字符�
 );
 rows(
   "model",
-  `protocol|responses（默认）或 chat-completions。主调用和辅助调用各自使用槽位协议；压缩沿用主模型。Responses 使用 store:false，不使用远端会话 ID。向量忽略此项。保存并重启生效。
+  `protocol|responses（默认）或 chat-completions。主调用和辅助调用各自使用槽位协议；压缩使用独立 summary 模型。Responses 使用 store:false，不使用远端会话 ID。向量忽略此项。保存并重启生效。
 baseUrl|兼容接口根地址，通常到 /v1。模型列表和本槽位的请求使用此地址。
 apiKeyEnv|当前 agent 的 .env 内的变量名，如 OPENAI_API_KEY；实际 key 在凭据区填写。不能把 key 本身填这里。
 name|请求发给服务商的精确模型 ID。可从模型列表选择；列表不会检查工具、视觉或 JSON 支持。
-contextWindow|主模型预算计算使用的窗口大小。填大不会扩展服务商限制；辅助/embedding 槽位的此项目前不限制请求。
-maxOutput|主模型或辅助 JSON 调用的总输出 token 上限，推理可能占用其中一部分。历史摘要请求取 main.maxOutput 与 history.summaryTokens 较大值；摘要实际保留文字仍受 summaryTokens 限制。embedding 忽略此项。
-reasoning|主对话和摘要使用 main 的推理强度；辅助请求使用各用途覆盖或 fast 的推理强度。辅助与摘要的 off 不发送参数，遵循服务端默认；向量不使用此项。
+contextWindow|主模型预算与压缩模型分批使用的窗口大小。填大不会扩展服务商限制；其他辅助/embedding 槽位的此项目前不限制请求。
+maxOutput|主模型或辅助 JSON 调用的总输出 token 上限，推理可能占用其中一部分。历史摘要请求取 summary.maxOutput 与 history.summaryTokens 较大值；摘要实际保留文字仍受 summaryTokens 限制。embedding 忽略此项。
+reasoning|主对话使用 main；摘要使用 summary，默认 off；辅助用途继承 fast。DeepSeek 摘要 off 显式发送 none；其他模型 off 不发送推理参数，按接口默认处理。向量忽略此项。
 compat|第四层 Pi 的兼容键。直连 api.deepseek.com 自动默认 supportsDeveloperRole=false，保留 system 身份，并默认 supportsMidConvoSystemMessages=true 保留背景的位置；用户明确值优先，其他端点保持 Pi 默认。辅助调用直接发送 system，不使用此项。`,
 );
 rows(
   "history",
   `triggerTokens|旧摘要加待保留原文的估算 token 超过此值才压缩。越大越多原文、成本更高；查看历史页不会触发压缩。
 targetTokens|压缩时从末尾尽量保留原文，容量扣除 summaryTokens 后作为保留目标。必须低于 triggerTokens，不是每轮硬裁切。
-summaryTokens|滚动摘要最终保留的文字 token 上限。摘要请求的总输出额度取它与 models.main.maxOutput 的较大值，为推理和 JSON 留空间；输出仍须完整且文字不超此值，否则不推进压缩检查点。保留重要事件、修正、未完成事项和工具结果。
+summaryTokens|滚动摘要最终保留的文字 token 上限。摘要请求的总输出额度取它与 models.summary.maxOutput 的较大值，为推理和 JSON 留空间；输出仍须完整且文字不超此值，否则不推进压缩检查点。保留重要事件、修正、未完成事项和工具结果。
 toolTailTokens|历史视图仅保留工具结果末尾这些 token；工具名、参数仍在记录里，完整结果另存文件。不是当前工具循环的结果上限。
 pollMs|当前 agent 的第二层隔多少毫秒检查新触发；同批消息一起处理，有在途工作先取消。值越小响应越及时，也增加检查频率。`,
 );
@@ -133,6 +133,11 @@ rows(
   "memory",
   `enabled|关闭时自动召回返回空列表。不会删除 memory.json，也不会单独关闭手动记忆工具和所有维护流程。
 query|启用时先调用 query 辅助模型生成线索；失败退回原查询。关闭则直接用最近对话材料检索。
+feelingShare|两侧按名额分配，0.5即各半；共用maxItems总量，重复不占两个名额，缺额补足。时间联系与预算仍在之后执行。
+feelingRecall|同一条记忆同时维护事实和感受索引。只影响自动召回；memory_search工具保留原事实搜索。两侧合并后共用所有后续参数。
+feelingInputTokens|感受query读取本轮与近期用户输入的容量，不传入当前情绪或人格；事实query保持原流程。
+feelingQueryTokens|截取小模型返回的feeling_query；为空或失败跳过感受侧，不替换事实query。
+feelingVectorThreshold|感受侧独立相关门槛；同ID只入选一次，两侧相关分取较高值，原状态倍率只乘一次。
 queryRecentMessages|本轮输入优先（可为内部触发），另取最近这些条真实用户输入帮助理解指代；旧内部触发、助手回复分句和工具事件不作为此前用户材料。
 queryInputTokens|送给 query 模型的材料截取上限；越大包含更多话题，可能稀释当前重点。
 queryDirections|保留辅助模型返回的前几条线索，拼成一个查询；当前不是并行多次向量搜索。
@@ -264,7 +269,11 @@ rows(
   `enabled|是否启动调度子进程；关闭后默认每日维护提醒、随机聊天和梦境都没有脚本来触发。外部事件接口仍可用。
 script|启动的脚本路径，可自行编辑；修改文件后点“重启定时脚本”，修改此配置应保存并重启服务。
 timezone|默认脚本解析 cron 和主动时间段的时区；不改变历史 ISO 时间和 UTC 日志文件名。
-randomChat|默认脚本是否给启用的 agent 安排随机聊天机会；机会到来后模型仍可沉默。
+randomChat|开启摸鱼/纯聊共用的随机计时器；到点按权重决定事件或安静。
+leisureDailyLimit|每天最多抽几次随机机会，包含安静和提交失败；0表示不设次数上限，此时不读写每日计数。按timezone换日，个人.runtime/leisure-state.json只记日期与次数；重启保留次数。手动触发不计数。
+moyuWeight|到点后抽到摸鱼的相对权重；概率=此值÷三项权重之和。只发读moyu Skill的事件，不执行Skill脚本；未安装Skill时回到纯聊天。
+chatWeight|到点后抽到原有randomGreeting纯聊天的相对权重；不读取摸鱼Skill。三项都为0时安静。
+quietWeight|到点后不提交事件的相对权重；安静也计入当日机会数，主模型不会被叫醒。
 randomMinMinutes|每次随机等待的最短分钟数，重启重新抽取。
 randomMaxMinutes|随机等待的最长分钟数，必须不小于最短值；在区间内均匀抽取。
 activeStart|随机聊天允许时间段的开始小时（含），使用配置时区。
@@ -326,6 +335,7 @@ rows(
   `system|替换基础 system 文本，然后仍会拼 persona、Project、Style；清除此键才重新使用 prompts/system.md。
 summary|历史整理规则，读个人 auxiliary.yaml。输入是结构化历史资料，只返回 {"summary":"..."}；不回复旧对话。格式错误不推进压缩检查点。
 query|替换查询线索提示词，要求返回 queries 数组；最近对话在输入里，不要改掉消费字段。
+feelingQuery|替换感受查询规则，要求返回feeling_query字符串；空值跳过这一路。只接收输入及部分近期用户发言。
 searchDescription|替换检索描述生成提示词，要求返回 search_text；维护时用于尚无描述的条目。
 rerank|替换候选重排提示词，要求返回已存在编号的 ids 数组。
 spark|修改本轮想象灵感生成规则，须返回spark字符串，允许空字符串。只看人格与本轮触发，不是状态评分或真实执行；保存个人auxiliary.yaml后下一次调用读取。

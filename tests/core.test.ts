@@ -178,6 +178,40 @@ test("chunker keeps streamed closing quotes with their sentence", () => {
   c.flush();
   assert.equal(out.at(-1), "最后一句。");
 });
+test("chunker attaches punctuation and expressions across every streamed split", () => {
+  for (const text of [
+    "好呀！！ᢉ𐭩 下一句。",
+    "收到。\n•ﻌ•\n继续。",
+    "抱抱……Ი︵𐑼 好啦。",
+    "Done! 👩‍💻 Next.",
+    "好呀！(≧▽≦) 再见。",
+    "他说：“好呀！！” 😊 下一句。",
+  ])
+    for (let split = 0; split <= text.length; split++) {
+      const out: string[] = [],
+        c = new Chunker((s) => out.push(s));
+      c.push(text.slice(0, split));
+      c.push(text.slice(split));
+      c.flush();
+      assert.equal(out.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+      assert.ok(
+        out.every((x) => !/^[！!？?。”😊ᢉ•Ი]/u.test(x)),
+        JSON.stringify({ text, split, out }),
+      );
+    }
+  const out: string[] = [],
+    c = new Chunker((s) => out.push(s));
+  for (const char of "好呀！！ᢉ𐭩 下一句。") c.push(char);
+  c.flush();
+  assert.deepEqual(out, ["好呀！！ᢉ𐭩", "下一句。"]);
+  const waiting: string[] = [],
+    d = new Chunker((s) => waiting.push(s));
+  d.push("好的。ᢉ");
+  d.discard();
+  d.flush();
+  assert.deepEqual(waiting, []);
+});
+
 test("history compacts only at capacity and keeps raw originals", async (t) => {
   const f = await fixture(t);
   const cfg = parseConfig({
@@ -206,6 +240,46 @@ test("history compacts only at capacity and keeps raw originals", async (t) => {
   await h.view("main");
   assert.equal(summaries, count);
   assert.equal(f.db.all("main").length, 8);
+});
+test("routine compaction failure retains history and retries next turn; hard limit and abort still fail", async (t) => {
+  const f = await fixture(t);
+  const cfg = parseConfig({
+    ...f.config.current,
+    history: {
+      ...f.config.current.history,
+      triggerTokens: 1500,
+      targetTokens: 800,
+      summaryTokens: 100,
+    },
+  });
+  for (let i = 0; i < 8; i++)
+    f.db.append({ ...event("retry" + i), text: "较早的经历 ".repeat(100) });
+  f.db.set("history:main", { through: 0, summary: "已有摘要" });
+  let fail = true,
+    calls = 0;
+  const h = new History(f.db, cfg, {
+    ...llm,
+    summarize: async () => {
+      calls++;
+      if (fail) throw Error("provider incomplete");
+      return "新摘要";
+    },
+  });
+  const view = await h.view("main");
+  assert.match(view, /已有摘要/);
+  assert.match(view, /较早的经历/);
+  assert.equal(f.db.get("history:main", { through: 0 }).through, 0);
+  assert.equal(f.db.all("main").length, 8);
+  await assert.rejects(h.view("main", undefined, 800), /provider incomplete/);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(h.view("main", controller.signal), /abort/i);
+  fail = false;
+  assert.match(await h.view("main"), /新摘要/);
+  assert.ok(f.db.get("history:main", { through: 0 }).through > 0);
+  const count = calls;
+  await h.view("main");
+  assert.equal(calls, count);
 });
 test("same poll batches input; new input cancels old run; tool events do not recurse", async (t) => {
   const f = await fixture(t);
@@ -2606,6 +2680,7 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
       channels: [{ id: "local", type: "webhook" }],
       models: {
         main: { ...model, reasoning: "high" },
+        summary: { ...model, reasoning: "off" },
         fast: { ...model, reasoning: "low" },
         emotion: { reasoning: "minimal" },
       },
@@ -2651,7 +2726,7 @@ test("auxiliary JSON and compaction use selected protocol; Responses rejects inc
         ? request.body.reasoning?.effort
         : request.body.reasoning_effort;
     assert.equal(effort(seen.at(-2)), "low");
-    assert.equal(effort(seen.at(-1)), "high");
+    assert.equal(effort(seen.at(-1)), undefined);
     await llm.json("emotion", {}, undefined, "emotion");
     assert.equal(effort(seen.at(-1)), "minimal");
     cfg.models.fast.reasoning = "off";
@@ -4125,4 +4200,282 @@ test("spark wrapping is configurable and legacy mapping files inherit it", () =>
   assert.match(sparkContext("a new idea", mapping), /不是记忆、用户请求/);
   assert.ok(parsePromptMapping("{}").text.spark.includes("{text}"));
   assert.throws(() => parsePromptMapping("text:\n  spark: '{invalid}'\n"));
+});
+
+test("manual history compaction bypasses threshold, reports results and protects cancellation", async (t) => {
+  const f = await fixture(t);
+  await f.config.save({
+    ...f.config.current,
+    history: {
+      ...f.config.current.history,
+      triggerTokens: 20000,
+      targetTokens: 1000,
+      summaryTokens: 700,
+    },
+  });
+  let release!: () => void;
+  let fail = false;
+  let seenBudget = 0;
+  const model: Intelligence = {
+    ...llm,
+    summarize: async (_text, budget) => {
+      seenBudget = budget;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      if (fail) throw Error("summary service unavailable");
+      return "用户喜欢读书；保留这一项已确认事实。";
+    },
+  };
+  const rt = new Runtime(f.config, f.db, async () => {}, model);
+  f.cleanup.push(() => rt.stop());
+  process.env.HINENI_TOKEN = "test-manual-compact-token-123456789";
+  const server = await servers(f.config, rt, new Scheduler(f.config, f.db));
+  f.cleanup.push(() => server.close());
+  const headers = { authorization: "Bearer " + process.env.HINENI_TOKEN };
+  const post = () =>
+    server.api.inject({
+      method: "POST",
+      url: "/v1/agents/main/history-compact",
+      headers,
+      payload: {},
+    });
+  // No prior history: succeeds without a paid request.
+  assert.equal((await post()).statusCode, 202);
+  await wait(() => rt.historyCompaction("main")?.status === "skipped");
+  for (let n = 0; n < 12; n++)
+    f.db.append({
+      ...event("compact-" + n),
+      type: "agent_reply",
+      text: "具体共同经历与已确认事实。".repeat(18),
+    });
+  const history = new History(
+    f.db,
+    agentConfig(rt.cfg, rt.cfg.agents[0]),
+    model,
+  );
+  assert.ok(history.inspect("main").estimated_tokens < 20000);
+  const count = f.db.all("main").length;
+  assert.equal((await post()).statusCode, 202);
+  assert.equal(rt.historyCompaction("main")?.status, "running");
+  assert.equal((await post()).statusCode, 409);
+  assert.throws(() => rt.clearHistorySummary("main"), /正在执行/);
+  assert.throws(() => rt.eraseHistory("main", "all"), /正在执行/);
+  release();
+  await wait(() => rt.historyCompaction("main")?.status === "completed");
+  assert.equal(seenBudget, 700);
+  assert.equal(f.db.all("main").length, count); // No synthetic chat or inference.
+  const first = rt.historyCompaction("main")!;
+  assert.ok(first.after_tokens! < first.before_tokens);
+  assert.equal(first.completed_batches, 1);
+  assert.match(first.summary!, /读书/);
+  const view = (
+    await server.api.inject({ url: "/v1/agents/main/history-view", headers })
+  ).json();
+  assert.equal(view.compaction.status, "completed");
+  const checkpoint = f.db.get("history:main", null);
+  f.db.append({
+    ...event("compact-new-history"),
+    type: "agent_reply",
+    text: "新的历史资料。".repeat(200),
+  });
+  fail = true;
+  await post();
+  release();
+  await wait(() => rt.historyCompaction("main")?.status === "failed");
+  assert.deepEqual(f.db.get("history:main", null), checkpoint);
+  assert.match(rt.historyCompaction("main")!.error!, /unavailable/);
+  fail = false;
+  await post();
+  // Even a model ignoring AbortSignal must not overwrite the checkpoint after cancellation.
+  rt.ingress(event("new-user-during-compaction"));
+  // Hold the next conversational tick; this test isolates the cancellation checkpoint.
+  rt.tick = () => {};
+  release();
+  await wait(() => rt.historyCompaction("main")?.status === "cancelled");
+  assert.deepEqual(f.db.get("history:main", null), checkpoint);
+  assert.equal(f.db.pending("main").length, 1);
+  assert.equal((await post()).statusCode, 409);
+  assert.equal(
+    (
+      await server.api.inject({
+        method: "POST",
+        url: "/v1/agents/unknown/history-compact",
+        headers,
+        payload: {},
+      })
+    ).statusCode,
+    400,
+  );
+});
+
+test("summary repairs oversized and invalid output without changing normal model reasoning", async (t) => {
+  const seen: any[] = [];
+  let outputs: string[] = [];
+  const server = http.createServer(async (req, res) => {
+    let raw = "";
+    for await (const part of req) raw += part;
+    seen.push(JSON.parse(raw));
+    const text = outputs.shift() ?? '{"summary":"short"}';
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify(
+        req.url === "/v1/responses"
+          ? {
+              id: "resp_summary",
+              object: "response",
+              status: "completed",
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text, annotations: [] }],
+                },
+              ],
+            }
+          : {
+              choices: [{ message: { content: text }, finish_reason: "stop" }],
+            },
+      ),
+    );
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise<void>((r) => server.close(() => r())));
+  for (const protocol of ["responses", "chat-completions"] as const) {
+    const cfg = parseConfig({
+      agents: [
+        {
+          id: "main",
+          name: "Main",
+          defaultTarget: { channel: "local", conversation: "owner" },
+        },
+      ],
+      channels: [{ id: "local", type: "webhook" }],
+      models: {
+        main: {
+          name: "deepseek-flash",
+          protocol,
+          reasoning: "high",
+          baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
+        },
+      },
+    });
+    cfg.models.summary = { ...cfg.models.main, reasoning: "off" };
+    const originalSummary = { ...cfg.models.summary };
+    const llm = new OpenAIModels(cfg, { OPENAI_API_KEY: "fake" });
+    const bodyInput = (b: any) =>
+      JSON.parse(
+        protocol === "responses" ? b.input : b.messages.at(-1).content,
+      );
+    outputs = [
+      JSON.stringify({ summary: "事实。".repeat(200) }),
+      '{"summary":"用户取消了任务；不再等待执行。"}',
+    ];
+    const start = seen.length;
+    assert.equal(
+      await llm.summarize("用户取消任务", 100),
+      "用户取消了任务；不再等待执行。",
+    );
+    assert.equal(seen.length - start, 2);
+    assert.ok(bodyInput(seen.at(-1)).measured_tokens > 100);
+    assert.equal(bodyInput(seen.at(-1)).draft_summary, "事实。".repeat(200));
+    assert.equal(
+      protocol === "responses"
+        ? seen.at(-1).reasoning.effort
+        : seen.at(-1).reasoning_effort,
+      "none",
+    );
+    assert.equal(cfg.models.main.reasoning, "high");
+    cfg.models.summary = {
+      ...cfg.models.summary,
+      name: "deepseek-summary",
+      reasoning: "low",
+      maxOutput: 3456,
+      apiKeyEnv: "SUMMARY_KEY",
+      baseUrl: cfg.models.main.baseUrl,
+    };
+    const separate = new OpenAIModels(cfg, { SUMMARY_KEY: "summary-only" });
+    assert.equal(await separate.summarize("摘要资料", 100), "short");
+    assert.equal(seen.at(-1).model, "deepseek-summary");
+    assert.equal(
+      protocol === "responses"
+        ? seen.at(-1).reasoning.effort
+        : seen.at(-1).reasoning_effort,
+      "low",
+    );
+    assert.equal(
+      protocol === "responses"
+        ? seen.at(-1).max_output_tokens
+        : seen.at(-1).max_completion_tokens,
+      3456,
+    );
+    cfg.models.summary = originalSummary;
+
+    outputs = ["not json", '{"summary":"有效摘要"}'];
+    assert.equal(await llm.summarize("原文", 100), "有效摘要");
+    assert.equal(bodyInput(seen.at(-1)).conversation_to_summarize, "原文");
+    outputs = Array(3).fill(JSON.stringify({ summary: "事实。".repeat(200) }));
+    const beforeFailure = seen.length;
+    await assert.rejects(
+      llm.summarize("原文", 100),
+      /exceeds its retained token budget/,
+    );
+    assert.equal(seen.length - beforeFailure, 3);
+    const abort = new AbortController();
+    abort.abort();
+    const beforeAbort = seen.length;
+    await assert.rejects(llm.summarize("原文", 100, abort.signal));
+    assert.equal(seen.length, beforeAbort);
+  }
+});
+
+test("summary configuration survives disk reload and stays independent of main and fast", async (t) => {
+  const f = await fixture(t);
+  const { agentConfig, summaryModelConfig } =
+    await import("../src/config/schema.js");
+  let cfg = structuredClone(f.config.current);
+  cfg.models.main.reasoning = "high";
+  cfg.models.summary.name = "summary-default";
+  cfg.models.summary.baseUrl = "https://summary.invalid/v1";
+  cfg.agents[0].overrides.models = {
+    main: { name: "agent-chat", baseUrl: "https://agent.invalid/v1" },
+    summary: { maxOutput: 4096 },
+  };
+  await f.config.save(cfg);
+  await f.config.load();
+  let selected = summaryModelConfig(
+    agentConfig(f.config.current, f.config.current.agents[0]),
+  );
+  assert.equal(selected.name, "summary-default");
+  assert.equal(selected.baseUrl, "https://summary.invalid/v1");
+  assert.equal(selected.reasoning, "off");
+  assert.equal(selected.maxOutput, 4096);
+  cfg = structuredClone(f.config.current);
+  (cfg.agents[0].overrides.models as any).summary = {
+    name: "summary-only",
+    reasoning: "low",
+    protocol: "chat-completions",
+    apiKeyEnv: "SUMMARY_KEY",
+  };
+  await f.config.save(cfg);
+  await f.config.load();
+  selected = summaryModelConfig(
+    agentConfig(f.config.current, f.config.current.agents[0]),
+  );
+  assert.equal(selected.name, "summary-only");
+  assert.equal(selected.reasoning, "low");
+  assert.equal(selected.protocol, "chat-completions");
+  assert.equal(selected.apiKeyEnv, "SUMMARY_KEY");
+  assert.equal(f.config.current.models.main.reasoning, "high");
+  assert.throws(
+    () =>
+      parseConfig({
+        ...cfg,
+        models: {
+          ...cfg.models,
+          summary: { contextWindow: 100000, maxOutput: 99000 },
+        },
+      }),
+    /压缩模型上下文容量/,
+  );
 });

@@ -121,13 +121,24 @@ export async function servers(
       async (req, reply) => {
         const memory = runtime.memories.get(agent(req.params.agent))!;
         const body = z
-          .object({ background: z.boolean().default(false) })
+          .object({
+            background: z.boolean().default(false),
+            side: z.enum(["both", "fact", "feeling"]).optional(),
+            ids: z.array(z.string().min(1)).min(1).max(10000).optional(),
+            force: z.boolean().default(false),
+          })
+          .strict()
           .parse(req.body ?? {});
+        if ((body.force || body.side || body.ids) && memory.indexingBusy())
+          throw Object.assign(Error("索引维护正在运行，请等待完成。"), {
+            statusCode: 409,
+          });
         if (body.background) {
-          memory.startIndexing();
+          if (body.force || body.side || body.ids) memory.requestIndexing(body);
+          else memory.startIndexing();
           return reply.code(202).send(await memory.indexStatus());
         }
-        const items = await memory.sync(true);
+        const items = await memory.sync(true, body);
         return { items: items.length, ...(await memory.indexStatus()) };
       },
     );

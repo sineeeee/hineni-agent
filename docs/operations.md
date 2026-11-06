@@ -52,16 +52,18 @@ Git 跟踪源码、锁文件、模板、配置样例和文档。实际 config.ya
 
 ## 摸鱼与随机聊天共用计时器
 
-摸鱼是正式Skill：模板在templates/skills/moyu，个人副本在agents/<id>/skills/moyu。SKILL.md说明如何使用；config.json保存来源与概率；scripts/dice.py抽签，scripts/fetch.py读取公开API/RSS。源仅保留HN、Lobsters、V2EX、Product Hunt、Bluesky、Tildes、MetaFilter、Colossal、Neatorama；只需要Python3.10+标准库，不需要账号、浏览器或其他常驻服务。
+每个agent的schedule.ts是调度入口，读取自己config.yaml的scheduler。它负责等待、时段、每天机会数leisureDailyLimit和moyuWeight/chatWeight/quietWeight三项相对权重。保存参数后重启个人定时脚本。main当前8–22点、19–45分钟、不限每日次数、摸鱼68/纯聊32/安静0权重；安静和提交失败也消耗一次机会。0表示不限次数，此时不读写每日计数；关闭自动机会用randomChat=false；三项权重全0时安静。
 
-定时到点→dice.py选moyu/chat/quiet→摸鱼或纯聊事件提交同一个/v1/events→第二层→第三层编排→主agent执行。quiet不提交事件。摸鱼事件指定SKILL.md和本轮抓取命令，主agent读Skill、抓取、选择分享或沉默；工具结果照常进第二层。未安装Skill或已在网页删除它时，原来的随机计时器只做纯聊天。新增agent按常规初始化复制Skill；已有个人schedule.ts不被覆盖，需确认包含leisureEvent接线。
+流程：schedule.ts到点→检查时间和额度→按权重选摸鱼/纯聊/安静→前两者提交同一个/v1/events→第二层记录→第三层编排→第四层执行。调度器不运行dice.py。纯聊天使用个人脚本原有randomGreeting；摸鱼事件给出SKILL.md路径和浏览意愿。主agent读Skill后运行dice.py选站，再运行fetch.py读取，最后决定分享或沉默。未安装Skill时摸鱼机会回到纯聊天。每日整理、梦境、一次性提醒不受此额度影响。
 
-main当前是当地8–22点，每100–200分钟一次机会；每天最多5次机会，相对权重摸鱼65、纯聊20、安静15。每次才投骰子；一次摸鱼抽2–3站，每站最多4条候选，最终自然分享一两件即可，也可沉默。原有纯聊天文案、每日记忆、梦境、一次性提醒保持原流程。
+Skill模板在templates/skills/moyu，个人副本在agents/<id>/skills/moyu。SKILL.md是模型执行说明；浏览规则和九个公开来源直接写在Skill自带的scripts/dice.py，fetch.py共用，不读取Hineni配置、不另设config.json。默认随机选2–3站、避开上次来源、每站最多4条、请求超时10秒。修改浏览方式就编辑Skill说明与脚本，下一次执行生效。保留HN、Lobsters、V2EX、Product Hunt、Bluesky、Tildes、MetaFilter、Colossal、Neatorama九个公开源。
 
-时间窗口/间隔/总开关在个人config.yaml的scheduler，保存后重启个人定时脚本。其他摸鱼配置都在skills/moyu/config.json，网页Skill页或文件页可打开，保存后下一次机会读取。字段含义见SKILL.md和网页文件说明。来源的enabled控制开关，至少留一个；RSS新增只需填name、enabled、kind=rss、url；其他API要有对应解析实现。
+个人.runtime/leisure-state.json只存调度当天日期和已抽次数，按scheduler.timezone换日；重启保留当天额度，但重新抽等待时间，不补发离线事件。Skill里的state.json只存最近来源与抽站次数，用于避重；last-edition.json存最近抓取结果，fetch-log.jsonl保留最近200行。抓取过不代表发过，分享去重看实际聊天。
 
-运行小文件也保留在自己的Skill目录：state.json是当天机会数和最近来源；跨天重置，重启保留当天配额，不记下一次时间。last-edition.json每次替换；fetch-log.jsonl只保留最近200行。抓取过不代表发过，分享去重看实际聊天。删除整个Skill会一并删除其配置和这些小文件。
+手动触发完整摸鱼：项目根目录执行 `node --import tsx agents/main/schedule.ts --once moyu --agent main`，只提交一次真实事件，不占自动额度，不启动计时器。只试读、不发消息：`python3 agents/main/skills/moyu/scripts/fetch.py d h`。dice.py的next抽站并保存来源历史；preview与show只读。调整来源直接修改Skill脚本中的来源表；关闭整个随机计时器设scheduler.randomChat=false并重启脚本。
 
-手动触发一次完整摸鱼：项目根目录执行`node --import tsx agents/main/schedule.ts --once moyu --agent main`。会向真实agent提交事件，不占自动配额，不另启计时器。只试读、不发消息：`python3 agents/main/skills/moyu/scripts/fetch.py d h`。`dice.py preview`和`show`只读；`next`只抽站。关闭某个来源改Skill的sources.enabled；关闭全部随机摸鱼与纯聊设scheduler.randomChat=false并重启定时脚本。
+迁移带上项目和个人文件，按常规npm ci、npm run build并启动；摸鱼仅需Python3.10+标准库，无账号、浏览器、pip包或额外常驻服务。某个来源失败单独记录，不冒充读完正文。DeepSeek原生搜索不是读取依赖；Pi的find/grep是文件搜索。源码的日额度辅助函数在src/shared/leisure.ts，个人调度脚本负责调用。
 
-迁移时带上项目和个人文件，按常规`npm ci`、`npm run build`并启动Hineni；系统有Python3.10+即可运行摸鱼脚本，不需要额外pip包、账号登录或浏览器初始化。网络需要能访问所选公开源；某个源失败会单独记录，不冒充已读正文。当前DeepSeek Flash原生web_search不作为读取依赖；Pi的find/grep是文件工具。
+生活日记随 `agents/<id>/workspace/diary/` 迁移，不依赖桌面浏览器。摸鱼/记忆 Skill 保存后下次读取生效；修改调度频率仍按原流程重启自己的调度脚本。
+
+记忆与梦境的定时文案分别指向 personal-memory 和 dream-diary Skill。记忆整理先看生活日记、再核对聊天和工具记录，按既有游标和条数预算推进，没有值得留下的经历就不添加。梦境默认取今天及前六天的真实记忆，第一人称短文保存在个人 workspace/dreams/；正文与记录元信息分开，创作不直接回填真实记忆。修改Skill下一次读取生效；修改定时文案或间隔后仅重启对应agent的定时脚本。

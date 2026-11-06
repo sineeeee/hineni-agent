@@ -34,7 +34,7 @@ hineni-agent/
 
 ## main 的定时任务改哪里
 
-现有随机招呼的间隔、时段和开关写在 `agents/main/config.yaml` 的 `scheduler`；等待、时段判断和提醒文字写在 `agents/main/schedule.ts`（`randomGreeting`）。改数字只改 config，改文字或新增任务改脚本。自定义任务可以直接在脚本里写时间和逻辑，不强制增加配置项；新参数只有被代码读取才会生效。
+随机摸鱼/纯聊的间隔、时段、开关、每日机会数和三项权重写在 `agents/main/config.yaml` 的 `scheduler`；等待、时段判断和提醒文字写在 `agents/main/schedule.ts`（`randomGreeting`）。改数字只改 config，改文字或新增任务改脚本。自定义任务可以直接在脚本里写时间和逻辑，不强制增加配置项；新参数只有被代码读取才会生效。
 
 保存后重启 main 的定时脚本，宿主会重新读取并校验磁盘配置，再启动个人脚本。主程序自动保持脚本运行。脚本到点向统一 `/v1/events` 提交带 main ID 的内部事件，由第二层记录并轮询接手，再经过第三、第四层；回复走 main 的默认渠道。
 

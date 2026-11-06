@@ -165,6 +165,8 @@ test("full third-layer preview exposes ordered prompts and never writes history,
   assert.equal(p!.stages[0].id, "input");
   assert.equal(p!.stages.at(-1)!.id, "final");
   assert.ok(p!.context.system.includes("[Operating rules]"));
+  assert.ok(p!.context.system.startsWith("[Persona]\n"));
+  assert.ok(p!.context.system.indexOf("[Persona]") < p!.context.system.indexOf("[Operating rules]"));
   assert.ok(p!.context.system.includes("[Project]"));
   assert.ok(p!.context.system.includes("demo"));
   assert.ok(!p!.context.system.includes("此正文不应自动加入Prompt"));

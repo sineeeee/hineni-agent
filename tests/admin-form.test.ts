@@ -10,6 +10,10 @@ function renderer() {
     client.indexOf("function form("),
     client.indexOf("let configGroup="),
   );
+  const models = client.slice(
+    client.indexOf("let modelScope="),
+    client.indexOf("async function renderAgents()"),
+  );
   const agents = client.slice(
     client.indexOf("async function renderAgents()"),
     client.indexOf("async function renderAgents()") +
@@ -40,6 +44,13 @@ function renderer() {
       tag,
       attrs,
       children: children.flat().filter(Boolean),
+      dataset: {},
+      querySelectorAll() {
+        return [];
+      },
+      querySelector() {
+        return null;
+      },
       append(...items: any[]) {
         this.children.push(...items.filter(Boolean));
       },
@@ -68,6 +79,7 @@ function renderer() {
   let failSave = false;
   const storage = new Map<string, string>();
   const api = async (_url: string, method = "GET", body?: any) => {
+    if (_url.startsWith("/v1/credentials")) return [];
     if (_url.startsWith("/v1/admin/file?"))
       return { content: '{"tasks":[]}', version: "tasks-v1" };
     if (method === "PUT") {
@@ -101,7 +113,7 @@ function renderer() {
   const setup = `let savedCfg=structuredClone(cfg), revision='initial',dirty=false,fileDirty=false,view='agents';
     const clone=structuredClone, agentId=cfg.agents[0].id;
     const refreshPromptPreviews=()=>{},agentOptions=()=>{},notify=()=>{},restart=async()=>{};
-    const show=async()=>view==='settings'?renderSettings():renderAgents(),actionHelp=()=>null;
+    const catalogs={}; const show=async()=>view==='models'?renderModels():view==='settings'?renderSettings():renderAgents(),actionHelp=()=>null;
     let configGroup='style',configScope='agent';const groupIntro=()=>null,refreshInheritanceHints=()=>null;
     const helpData={lessons:{}},fieldHelp={},labels={};
     const overrideGroups=['models','history','context','memory','state','style','runtime','delivery','prompts','drives','scheduler','mcp'];
@@ -125,9 +137,10 @@ function renderer() {
       dirtyCode +
       form +
       agents +
+      models +
       settingCode +
       saveCode +
-      ";return {form,renderAgents,saveConfig,getCfg:()=>cfg,getDirty:()=>dirty,setGroup:(g)=>{configGroup=g;view='settings';return renderSettings();},pendingConfigJson};",
+      ";return {form,renderAgents,renderModels:()=>{view='models';return renderModels();},saveConfig,getCfg:()=>cfg,getDirty:()=>dirty,setGroup:(g)=>{configGroup=g;view='settings';return renderSettings();},pendingConfigJson};",
   )(
     cfg,
     z.toJSONSchema(ConfigSchema),
@@ -361,4 +374,121 @@ test("cleanup UI selects runs and routes execution/context/log actions separatel
   assert.ok(
     Math.abs(Date.now() - Date.parse(last.body.before) - 7 * 86400000) < 1000,
   );
+});
+
+test("manual compaction panel renders running, result and failure states", () => {
+  const code = client.slice(
+    client.indexOf("function compactionPanel("),
+    client.indexOf("async function loadHistoryView("),
+  );
+  const el = (tag: string, attrs: any = {}, ...children: any[]) => ({
+    tag,
+    ...attrs,
+    children: children.filter(Boolean),
+  });
+  const render = new Function(
+    "el",
+    "panel",
+    "btn",
+    "compactHistoryNow",
+    code + ";return compactionPanel;",
+  )(
+    el,
+    (title: string, ...children: any[]) => ({ title, children }),
+    (text: string, action: any) => ({ text, action, disabled: false }),
+    () => {},
+  );
+  const job = {
+    status: "running",
+    started_at: new Date().toISOString(),
+    completed_batches: 1,
+    before_tokens: 18000,
+    target_tokens: 2000,
+    summary_tokens: 1500,
+  };
+  const running = render(job, false);
+  assert.equal(running.children[1].disabled, true);
+  assert.match(JSON.stringify(running), /正在压缩.*已完成 1 批/);
+  const complete = render(
+    {
+      ...job,
+      status: "completed",
+      after_tokens: 1900,
+      duration_ms: 5000,
+      summary: "真实新摘要",
+    },
+    false,
+  );
+  assert.equal(complete.children[1].disabled, false);
+  assert.match(JSON.stringify(complete), /真实新摘要/);
+  assert.match(JSON.stringify(complete), /1900 token/);
+  assert.match(
+    JSON.stringify(
+      render({ ...job, status: "failed", error: "model unavailable" }, false),
+    ),
+    /model unavailable/,
+  );
+  assert.equal(render(null, true).children[1].disabled, true);
+});
+
+test("summary model card saves, continues editing, reloads and restores inheritance", async () => {
+  const r = renderer();
+  await r.renderModels();
+  const prefix = "agents.0.overrides.models.summary.";
+  const field = (key: string) => r.fields.get(prefix + key);
+  assert.equal(field("reasoning").value, "off");
+  field("name").update("summary-one");
+  field("reasoning").update("low");
+  await r.saveConfig();
+  assert.equal(field("name").value, "summary-one");
+  field("name").update("summary-two");
+  field("reasoning").update("off");
+  await r.saveConfig(true);
+  await r.renderModels();
+  assert.equal(field("name").value, "summary-two");
+  assert.equal(field("reasoning").value, "off");
+  assert.equal(
+    r.stored().agents[0].overrides.models.summary.name,
+    "summary-two",
+  );
+  assert.equal(r.stored().agents[0].overrides.models.main.reasoning, "low");
+  const card = r.nodes.filter((n: any) => n.attrs.title === "summary").at(-1);
+  const findReset = (n: any): any =>
+    n?.attrs?.text === "此模型恢复继承"
+      ? n
+      : n?.children?.map(findReset).find(Boolean);
+  await findReset(card).attrs.fn();
+  await r.saveConfig();
+  assert.equal(r.stored().agents[0].overrides.models.summary, undefined);
+  assert.equal(field("reasoning").value, "off");
+  assert.equal(field("name").value, r.cfg.models.summary.name);
+});
+
+test("settings models exposes summary without overrides and edits the same role as model cards", async () => {
+  const r = renderer();
+  const prefix = "agents.0.overrides.models.summary.";
+  const field = (key: string) => r.fields.get(prefix + key);
+  r.cfg.models.main.name = "different-main";
+  r.cfg.models.fast.name = "different-fast";
+  r.cfg.models.summary.name = "independent-summary";
+  await r.setGroup("models");
+  assert.equal(field("name").value, r.cfg.models.summary.name);
+  assert.equal(field("reasoning").value, "off");
+  assert.equal(r.cfg.agents[0].overrides.models.summary, undefined);
+  field("name").update("summary-from-settings");
+  await r.saveConfig();
+  assert.equal(
+    r.stored().agents[0].overrides.models.summary.name,
+    "summary-from-settings",
+  );
+  assert.deepEqual(Object.keys(r.stored().agents[0].overrides.models.summary), [
+    "name",
+  ]);
+  await r.renderModels();
+  assert.equal(field("name").value, "summary-from-settings");
+  field("reasoning").update("low");
+  await r.saveConfig(true);
+  await r.setGroup("models");
+  assert.equal(field("reasoning").value, "low");
+  assert.equal(field("name").value, "summary-from-settings");
 });

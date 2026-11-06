@@ -1,4 +1,8 @@
-import { memoryFactors, synchronizeMemoryIndex } from "./memory-ranking.js";
+import {
+  balancedMemories,
+  memoryFactors,
+  synchronizeMemoryIndex,
+} from "./memory-ranking.js";
 import { auxiliaryPrompt } from "../config/auxiliary.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -23,6 +27,11 @@ const Item = z
   })
   .passthrough();
 export type Memory = z.infer<typeof Item> & { id: string };
+export interface IndexOptions {
+  side?: "both" | "fact" | "feeling";
+  ids?: string[];
+  force?: boolean;
+}
 export interface State {
   updated_at: string;
   assessed_at?: string;
@@ -48,6 +57,7 @@ const terms = (s: string) =>
     ).concat([...s.matchAll(/[\p{Script=Han}]{2}/gu)].map((x) => x[0])),
   );
 export class MemoryService {
+  private feelingCache = new Map<string, { at: number; text: string }>();
   private queryCache = new Map<string, { at: number; text: string }>();
   private stateChain: Promise<unknown> = Promise.resolve();
   private indexChain: Promise<unknown> = Promise.resolve();
@@ -187,6 +197,8 @@ export class MemoryService {
     this.stateChain = job.catch(() => {});
     return job;
   }
+  private contentChain: Promise<unknown> = Promise.resolve();
+  private pendingEnrichment = false;
   private enriching = false;
   private indexingTask?: Promise<void>;
   private progress = {
@@ -204,18 +216,31 @@ export class MemoryService {
       index = await this.index();
     const ready = items.filter(
       (m) =>
+        index[m.id]?.version === 2 &&
+        index[m.id]?.embeddingModel ===
+          this.cfg.models.embedding.baseUrl +
+            "|" +
+            this.cfg.models.embedding.name &&
         index[m.id]?.vectors?.length &&
+        (!this.cfg.memory.feelingRecall ||
+          !index[m.id]?.feelingText ||
+          index[m.id]?.feelingVectors?.length) &&
         index[m.id].hash ===
           createHash("sha256").update(JSON.stringify(m)).digest("hex"),
     ).length;
     return {
       ...this.progress,
+      job_total: this.progress.total,
+      fact_ready: items.filter((m) => index[m.id]?.vectors?.length).length,
+      feeling_ready: items.filter((m) => index[m.id]?.feelingVectors?.length)
+        .length,
+      feeling_total: items.filter((m) => index[m.id]?.feelingText).length,
       total: items.length,
       ready,
       pending: items.length - ready,
     };
   }
-  startIndexing() {
+  startIndexing(options: IndexOptions = {}) {
     if (this.indexingTask || this.enriching) return;
     this.progress = {
       status: "running",
@@ -227,7 +252,7 @@ export class MemoryService {
       started_at: new Date().toISOString(),
       finished_at: "",
     };
-    this.indexingTask = this.sync(true)
+    this.indexingTask = this.sync(true, options)
       .then(
         () => {},
         (e) => {
@@ -242,6 +267,10 @@ export class MemoryService {
       )
       .finally(() => {
         this.indexingTask = undefined;
+        if (this.pendingEnrichment && !this.lifecycle.signal.aborted) {
+          this.pendingEnrichment = false;
+          this.startIndexing();
+        }
       });
   }
   private mutateIndex<T>(
@@ -256,23 +285,37 @@ export class MemoryService {
     this.indexChain = job.catch(() => {});
     return job;
   }
-  async sync(enrich = false) {
+  async sync(enrich = false, options: IndexOptions = {}) {
     if (this.preview) return this.items();
-    const items = await this.items();
-    if (!this.itemsValid) {
-      if (enrich) throw Error("memory.json 无效，请先修正文件。");
-      return items;
-    }
     const signature =
       this.cfg.models.embedding.baseUrl + "|" + this.cfg.models.embedding.name;
-    await this.mutateIndex(async (index) => {
-      synchronizeMemoryIndex(items, index, signature, this.now());
+    const items = await this.mutateIndex(async (index) => {
+      // Read inside the index queue: an earlier snapshot must not resurrect deleted rows.
+      const latest = await this.items();
+      if (!this.itemsValid) {
+        if (enrich) throw Error("memory.json 无效，请先修正文件。");
+        return latest;
+      }
+      synchronizeMemoryIndex(latest, index, signature, this.now());
+      return latest;
     });
+    if (!this.itemsValid) return items;
     if (!enrich || this.enriching) return items;
+    if (options.ids?.some((id) => !items.some((m) => m.id === id)))
+      throw Error("重建列表含不存在的记忆，请刷新后重试。");
     this.enriching = true;
+    const work = options.ids
+      ? items.filter((m) => options.ids!.includes(m.id))
+      : items;
+    const factSide = options.side !== "feeling";
+    const feelingSide =
+      options.side !== "fact" &&
+      (this.cfg.memory.feelingRecall ||
+        options.side === "feeling" ||
+        options.side === "both");
     this.progress = {
       status: "running",
-      total: items.length,
+      total: work.length,
       processed: 0,
       failed: 0,
       current_id: "",
@@ -281,61 +324,125 @@ export class MemoryService {
       finished_at: "",
     };
     try {
+      if (options.force)
+        await this.mutateIndex(async (index) => {
+          for (const m of work)
+            if (index[m.id]) {
+              if (factSide) {
+                index[m.id].vectors = [];
+                index[m.id].description = "";
+              }
+              if (feelingSide) index[m.id].feelingVectors = [];
+            }
+        });
       const snapshot = await this.index();
       // Network work happens outside the index writer so normal recall remains responsive.
       for (
         let start = 0;
-        start < items.length;
+        start < work.length;
         start += this.cfg.memory.maintenanceBatchItems
       ) {
-        for (const m of items.slice(
+        for (const m of work.slice(
           start,
           start + this.cfg.memory.maintenanceBatchItems,
         )) {
           if (this.lifecycle.signal.aborted) break;
           const row = snapshot[m.id];
-          if (row.vectors.length) {
+          if (!row) {
+            this.progress.processed++;
+            continue;
+          }
+          if (
+            (!factSide || row.vectors.length) &&
+            (!feelingSide || !row.feelingText || row.feelingVectors?.length)
+          ) {
             this.progress.processed++;
             continue;
           }
           this.progress.current_id = m.id;
           try {
-            let description = row.description;
             const deadline = AbortSignal.any([
               this.lifecycle.signal,
               AbortSignal.timeout(this.cfg.memory.maintenanceTimeoutMs),
             ]);
-            if (this.cfg.memory.searchDescription && !description) {
-              const d = await this.llm.json(
-                await auxiliaryPrompt(this.root, this.cfg, "searchDescription"),
-                { memory: m },
-                deadline,
-                "maintenance",
-              );
-              description = cut(
-                String(d.search_text ?? ""),
-                this.cfg.memory.descriptionTokens,
-              );
-            }
-            const pieces = chunks(
-                description + "\n" + row.text,
+            const embedPieces = async (text: string) => {
+              const pieces = chunks(
+                text,
                 this.cfg.memory.chunkTokens,
                 this.cfg.memory.chunkOverlap,
-              ),
-              vectors: number[][] = [];
-            for (let p = 0; p < pieces.length; p += 20)
-              vectors.push(
-                ...(await this.llm.embed(pieces.slice(p, p + 20), deadline)),
               );
-            await this.mutateIndex(async (current) => {
+              const vectors: number[][] = [];
+              for (let p = 0; p < pieces.length; p += 20)
+                vectors.push(
+                  ...(await this.llm.embed(pieces.slice(p, p + 20), deadline)),
+                );
               if (
-                current[m.id]?.hash === row.hash &&
-                current[m.id]?.embeddingModel === signature
-              ) {
-                current[m.id].description = description;
-                current[m.id].vectors = vectors;
-              }
-            });
+                vectors.length !== pieces.length ||
+                vectors.some((v) => !v.length)
+              )
+                throw Error("Incomplete memory embeddings");
+              return vectors;
+            };
+            const save = async (fields: Record<string, unknown>) =>
+              this.mutateIndex(async (current) => {
+                if (
+                  current[m.id]?.hash === row.hash &&
+                  current[m.id]?.embeddingModel === signature
+                )
+                  Object.assign(current[m.id], fields);
+              });
+            const outcomes = await Promise.allSettled([
+              (async () => {
+                if (!factSide || row.vectors.length) return;
+                let description = row.description;
+                if (this.cfg.memory.searchDescription && !description) {
+                  const d = await this.llm.json(
+                    await auxiliaryPrompt(
+                      this.root,
+                      this.cfg,
+                      "searchDescription",
+                    ),
+                    {
+                      memory: {
+                        summary: m.summary,
+                        details: m.details,
+                        people: m.people,
+                        agent_name: m.agent_name,
+                      },
+                    },
+                    deadline,
+                    "maintenance",
+                  );
+                  description = cut(
+                    String(d.search_text ?? ""),
+                    this.cfg.memory.descriptionTokens,
+                  );
+                }
+                await save({
+                  description,
+                  vectors: await embedPieces(description + "\n" + row.text),
+                });
+              })(),
+              (async () => {
+                if (
+                  !feelingSide ||
+                  !row.feelingText ||
+                  row.feelingVectors?.length
+                )
+                  return;
+                await save({
+                  feelingVectors: await embedPieces(row.feelingText),
+                });
+              })(),
+            ]);
+            const failures = outcomes.filter((x) => x.status === "rejected");
+            if (failures.length)
+              throw new AggregateError(
+                failures.map((x) => (x as PromiseRejectedResult).reason),
+                failures
+                  .map((x) => errorText((x as PromiseRejectedResult).reason))
+                  .join("; "),
+              );
           } catch (e) {
             this.progress.failed++;
             this.progress.error = errorText(e);
@@ -357,6 +464,14 @@ export class MemoryService {
       this.progress.current_id = "";
       this.progress.finished_at = new Date().toISOString();
       this.enriching = false;
+      if (
+        !this.indexingTask &&
+        this.pendingEnrichment &&
+        !this.lifecycle.signal.aborted
+      ) {
+        this.pendingEnrichment = false;
+        this.startIndexing();
+      }
     }
     return items;
   }
@@ -386,6 +501,7 @@ export class MemoryService {
     explicit = false,
     limit = this.cfg.memory.maxItems,
     signal?: AbortSignal,
+    feelingQuery = "",
   ) {
     const items = await this.sync(false),
       index = await this.index(),
@@ -395,61 +511,109 @@ export class MemoryService {
     const searchSignal = signal
       ? AbortSignal.any([signal, deadline])
       : deadline;
-    let vectors: number[][] = [];
-    try {
-      vectors = await this.llm.embed([cut(query, 1000)], searchSignal);
-    } catch (e) {
-      this.db.log(
-        "warn",
-        "memory",
-        "semantic recall unavailable; lexical fallback",
-        { error: errorText(e) },
-      );
-    }
+    // Each route can fall back independently; one failed query cannot erase the other.
+    const vectors = await Promise.all(
+      [cut(query, 1000), ...(feelingQuery ? [feelingQuery] : [])].map(
+        async (text, route) => {
+          try {
+            return (await this.llm.embed([text], searchSignal))[0] ?? [];
+          } catch (e) {
+            this.db.log(
+              "warn",
+              "memory",
+              "semantic recall unavailable; lexical fallback",
+              { route: route ? "feeling" : "fact", error: errorText(e) },
+            );
+            return [];
+          }
+        },
+      ),
+    );
+    const fq = terms(feelingQuery);
     const q = terms(query),
-      ranked = items.map((m) => {
-        const row = index[m.id],
-          t = terms(row.text);
-        const lex = [...q].filter((k) => t.has(k)).length / Math.max(1, q.size);
-        const sem = vectors.length
-          ? Math.max(
-              0,
-              ...row.vectors.map((v: number[]) => cosine(vectors[0], v)),
-            )
-          : 0;
-        const factors = memoryFactors(
-          m,
-          row,
-          state,
-          this.cfg.memory,
-          this.now(),
-          explicit,
-        );
-        return {
-          m,
-          lex,
-          sem,
-          factors,
-          A: factors.strength,
-          I: factors.importance,
-          B: factors.activation,
-          E: factors.emotion,
-          F: factors.familiarity,
-        };
-      });
+      ranked = items
+        .filter((m) => index[m.id])
+        .map((m) => {
+          const row = index[m.id],
+            t = terms(row.text);
+          const lex =
+            [...q].filter((k) => t.has(k)).length / Math.max(1, q.size);
+          const sem = vectors.length
+            ? Math.max(
+                0,
+                ...row.vectors.map((v: number[]) => cosine(vectors[0], v)),
+              )
+            : 0;
+          const ft = terms(row.feelingText ?? "");
+          const feelingLex = feelingQuery
+            ? [...fq].filter((k) => ft.has(k)).length / Math.max(1, fq.size)
+            : 0;
+          const feelingSem = vectors[1]
+            ? Math.max(
+                0,
+                ...(row.feelingVectors ?? []).map((v: number[]) =>
+                  cosine(vectors[1], v),
+                ),
+              )
+            : 0;
+          const factors = memoryFactors(
+            m,
+            row,
+            state,
+            this.cfg.memory,
+            this.now(),
+            explicit,
+          );
+          return {
+            m,
+            feelingLex,
+            feelingSem,
+            lex,
+            sem,
+            factors,
+            A: factors.strength,
+            I: factors.importance,
+            B: factors.activation,
+            E: factors.emotion,
+            F: factors.familiarity,
+          };
+        });
     const lex = [...ranked].sort((a, b) => b.lex - a.lex),
       sem = [...ranked].sort((a, b) => b.sem - a.sem);
+    const fl = [...ranked].sort((a, b) => b.feelingLex - a.feelingLex),
+      fs = [...ranked].sort((a, b) => b.feelingSem - a.feelingSem);
+    const factEligible = (x: (typeof ranked)[number]) =>
+      x.lex > 0 || x.sem > this.cfg.memory.vectorThreshold;
+    const feelingEligible = (x: (typeof ranked)[number]) =>
+      !!feelingQuery &&
+      (x.feelingLex > 0 ||
+        x.feelingSem > this.cfg.memory.feelingVectorThreshold);
+    const rrf = (
+      x: (typeof ranked)[number],
+      a: typeof ranked,
+      b: typeof ranked,
+    ) =>
+      1 / (this.cfg.memory.rrfK + a.indexOf(x) + 1) +
+      1 / (this.cfg.memory.rrfK + b.indexOf(x) + 1);
     let results = ranked
-      .filter((x) => x.lex > 0 || x.sem > this.cfg.memory.vectorThreshold)
+      .filter((x) => factEligible(x) || feelingEligible(x))
       .map((x) => ({
         ...x,
         score:
-          (1 / (this.cfg.memory.rrfK + lex.indexOf(x) + 1) +
-            1 / (this.cfg.memory.rrfK + sem.indexOf(x) + 1)) *
-          x.factors.multiplier,
+          Math.max(
+            factEligible(x) ? rrf(x, lex, sem) : 0,
+            feelingEligible(x) ? rrf(x, fl, fs) : 0,
+          ) * x.factors.multiplier,
       }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, this.cfg.memory.candidates);
+      .sort((a, b) => b.score - a.score);
+    const share = feelingQuery && !explicit ? this.cfg.memory.feelingShare : 0;
+    results = balancedMemories(
+      results,
+      this.cfg.memory.candidates,
+      share,
+      factEligible,
+      feelingEligible,
+    ).map((x) => x.value);
     const initialScores = new Map(results.map((x) => [x.m.id, x.score]));
     if (this.cfg.memory.rerank && results.length > 1 && !explicit)
       try {
@@ -457,9 +621,13 @@ export class MemoryService {
           await auxiliaryPrompt(this.root, this.cfg, "rerank"),
           {
             query,
+            feeling_query: feelingQuery,
             memories: results.map((x) => ({
               id: x.m.id,
               summary: x.m.summary,
+              ...(feelingQuery
+                ? { feeling: x.m.emotion?.feeling, labels: x.m.emotion?.labels }
+                : {}),
             })),
           },
           signal
@@ -484,29 +652,48 @@ export class MemoryService {
         });
       }
     const rerankedScores = new Map(results.map((x) => [x.m.id, x.score]));
-    const selected: typeof results = [];
-    while (results.length && selected.length < limit) {
-      results.sort((a, b) => b.score - a.score);
-      const next = results.shift()!;
-      selected.push(next);
-      const a = terms(next.m.summary);
-      for (const x of results) {
-        const b = terms(x.m.summary),
-          overlap =
-            [...a].filter((t) => b.has(t)).length /
-            Math.max(1, new Set([...a, ...b]).size);
-        x.score *= 1 - this.cfg.memory.diversityPenalty * overlap;
-      }
-    }
+    const picks = balancedMemories(
+      results,
+      limit,
+      share,
+      factEligible,
+      feelingEligible,
+      (next, remaining) => {
+        const a = terms(next.m.summary);
+        for (const x of remaining) {
+          const b = terms(x.m.summary),
+            overlap =
+              [...a].filter((t) => b.has(t)).length /
+              Math.max(1, new Set([...a, ...b]).size);
+          x.score *= 1 - this.cfg.memory.diversityPenalty * overlap;
+        }
+      },
+    );
+    const selected = picks
+      .map((x) => x.value)
+      .sort((a, b) => b.score - a.score);
     this.observation?.search?.({
       query,
+      feeling_query: feelingQuery,
+      quotas: {
+        fact: limit - Math.round(limit * share),
+        feeling: Math.round(limit * share),
+      },
       explicit,
       entries: ranked.map((x) => ({
         id: x.m.id,
         lexical: x.lex,
         semantic: x.sem,
         factors: x.factors,
-        eligible: x.lex > 0 || x.sem > this.cfg.memory.vectorThreshold,
+        feeling_lexical: x.feelingLex,
+        feeling_semantic: x.feelingSem,
+        allocated_route:
+          picks.find((p) => p.value.m.id === x.m.id)?.route ?? null,
+        matched_routes: [
+          factEligible(x) ? "fact" : "",
+          feelingEligible(x) ? "feeling" : "",
+        ].filter(Boolean),
+        eligible: factEligible(x) || feelingEligible(x),
         candidate: initialScores.has(x.m.id),
         initial_score: initialScores.get(x.m.id) ?? null,
         reranked_score: rerankedScores.get(x.m.id) ?? null,
@@ -537,9 +724,42 @@ export class MemoryService {
     );
     return selected.map((x) => x.m);
   }
+  private async feelingQuery(material: string, signal?: AbortSignal) {
+    if (!this.cfg.memory.feelingRecall) return "";
+    const text = cut(material, this.cfg.memory.feelingInputTokens);
+    const cached = this.feelingCache.get(text);
+    if (
+      cached &&
+      Date.now() - cached.at < this.cfg.memory.queryCacheSeconds * 1000
+    )
+      return cached.text;
+    try {
+      const deadline = AbortSignal.timeout(this.cfg.memory.queryTimeoutMs);
+      const result = await this.llm.json(
+        await auxiliaryPrompt(this.root, this.cfg, "feelingQuery"),
+        { route: "feeling", text },
+        signal ? AbortSignal.any([signal, deadline]) : deadline,
+        "query",
+      );
+      const q =
+        typeof result.feeling_query === "string"
+          ? cut(result.feeling_query.trim(), this.cfg.memory.feelingQueryTokens)
+          : "";
+      this.feelingCache.set(text, { at: Date.now(), text: q });
+      if (this.feelingCache.size > 50)
+        this.feelingCache.delete(this.feelingCache.keys().next().value!);
+      return q;
+    } catch (e) {
+      this.db.log("warn", "memory", "feeling query skipped", {
+        error: errorText(e),
+      });
+      return "";
+    }
+  }
   async recall(query: string, signal?: AbortSignal) {
     if (!this.cfg.memory.enabled) return [];
     if (!(await this.items()).length) return [];
+    const feelingPending = this.feelingQuery(query, signal);
     let q = query;
     if (this.cfg.memory.query)
       try {
@@ -573,9 +793,20 @@ export class MemoryService {
           error: errorText(e),
         });
       }
-    this.observation?.query?.({ original: query, expanded: q });
+    const feelingQuery = await feelingPending;
+    this.observation?.query?.({
+      original: query,
+      expanded: q,
+      feeling: feelingQuery,
+    });
     if (!q.trim()) return [];
-    const found = await this.search(q, false, this.cfg.memory.maxItems, signal);
+    const found = await this.search(
+      q,
+      false,
+      this.cfg.memory.maxItems,
+      signal,
+      feelingQuery,
+    );
     const all = await this.items();
     const reasons = Object.fromEntries(found.map((m) => [m.id, "relevant"]));
     this.observation?.phase?.({
@@ -704,6 +935,85 @@ export class MemoryService {
     });
     return out;
   }
+  async changeMemory(
+    action: "create" | "update" | "delete",
+    expectedVersion: string,
+    entry?: unknown,
+    entryId?: string,
+    rebuild = false,
+  ) {
+    const job = this.contentChain.then(async () => {
+      const file = path.join(this.root, "memory.json");
+      const raw = await readJson<any>(file, { memory: [] });
+      z.object({ memory: z.array(Item) })
+        .passthrough()
+        .parse(raw);
+      const version = createHash("sha256")
+        .update(JSON.stringify(raw))
+        .digest("hex");
+      if (version !== expectedVersion)
+        throw Object.assign(Error("记忆已被其他操作修改，请刷新后再编辑。"), {
+          statusCode: 409,
+        });
+      let changedId = entryId;
+      if (action === "delete") {
+        if (!raw.memory.some((m: any) => m.id === entryId))
+          throw Error("Unknown memory");
+        raw.memory = raw.memory.filter((m: any) => m.id !== entryId);
+      } else {
+        const parsed = Item.extend({
+          summary: z.string().trim().min(1),
+          occurred_at: z
+            .string()
+            .refine((s) => Number.isFinite(Date.parse(s)), "日期无效"),
+        }).parse(entry);
+        if (action === "create") {
+          changedId = id();
+          raw.memory.push({ ...parsed, id: changedId });
+        } else {
+          const i = raw.memory.findIndex((m: any) => m.id === entryId);
+          if (i < 0) throw Error("Unknown memory");
+          if (parsed.id && parsed.id !== entryId) throw Error("不能修改记忆ID");
+          raw.memory[i] = { ...parsed, id: entryId };
+        }
+      }
+      await jsonWrite(file, raw);
+      await this.sync(false);
+      if (action === "delete") {
+        await this.updateState((s) => {
+          delete s.activation[entryId!];
+        });
+        const associations = this.db.get<Record<string, unknown>>(
+          `associations:${this.agentId}`,
+          {},
+        );
+        delete associations[entryId!];
+        this.db.set(`associations:${this.agentId}`, associations);
+      }
+      if (rebuild && action !== "delete") {
+        if (this.enriching || this.indexingTask) this.pendingEnrichment = true;
+        else this.startIndexing({ ids: [changedId!], side: "both" });
+      }
+      return {
+        id: changedId,
+        saved: true,
+        indexing: rebuild && action !== "delete",
+        version: createHash("sha256").update(JSON.stringify(raw)).digest("hex"),
+      };
+    });
+    this.contentChain = job.catch(() => {});
+    return job;
+  }
+  indexingBusy() {
+    return !!this.indexingTask || this.enriching;
+  }
+  requestIndexing(options: IndexOptions) {
+    if (this.enriching || this.indexingTask)
+      throw Object.assign(Error("索引维护正在运行，请完成后再重建。"), {
+        statusCode: 409,
+      });
+    this.startIndexing(options);
+  }
   private async inspectionSnapshot() {
     const raw = await readJson<any>(path.join(this.root, "memory.json"), {
       memory: [],
@@ -737,6 +1047,7 @@ export class MemoryService {
     return {
       items,
       rawItems: raw.memory,
+      version: createHash("sha256").update(JSON.stringify(raw)).digest("hex"),
       index,
       storedIndex,
       storedState,
@@ -754,6 +1065,7 @@ export class MemoryService {
     );
     return {
       agent_id: this.agentId,
+      version: snap.version,
       as_of: new Date(snap.now).toISOString(),
       paths: {
         memory: path.join(this.root, "memory.json"),
@@ -776,14 +1088,20 @@ export class MemoryService {
         .filter((m) => !entryId || m.id === entryId)
         .map((m) => {
           const stored = snap.storedIndex[m.id];
-          const { vectors, ...fields } = stored ?? {};
+          const { vectors, feelingVectors, ...fields } = stored ?? {};
           return {
             id: m.id,
             memory: snap.rawItems.find((x: any) => x.id === m.id),
             stored_index: stored
               ? {
                   ...fields,
-                  ...(entryId ? { vectors } : {}),
+                  ...(entryId ? { vectors, feelingVectors } : {}),
+                  feeling_vector_count: feelingVectors?.length ?? 0,
+                  feeling_vector_dimensions: [
+                    ...new Set(
+                      (feelingVectors ?? []).map((v: number[]) => v.length),
+                    ),
+                  ],
                   vector_count: vectors?.length ?? 0,
                   vector_dimensions: [
                     ...new Set((vectors ?? []).map((v: number[]) => v.length)),
@@ -792,6 +1110,7 @@ export class MemoryService {
               : null,
             index_current:
               !!stored &&
+              stored.version === 2 &&
               stored.hash === snap.index[m.id].hash &&
               stored.embeddingModel === snap.index[m.id].embeddingModel,
             factors: memoryFactors(
@@ -823,7 +1142,10 @@ export class MemoryService {
     const llm: Intelligence = {
       json: async (prompt, input, signal, purpose) => {
         const call = {
-          purpose: purpose ?? "query",
+          purpose:
+            purpose === "query" && (input as any)?.route === "feeling"
+              ? "feelingQuery"
+              : (purpose ?? "query"),
           system: prompt,
           input,
         } as (typeof calls)[number];

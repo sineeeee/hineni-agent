@@ -75,7 +75,7 @@
 
 ## model
 
-主模型负责聊天、工具循环和历史压缩；fast 是五类辅助 JSON 调用的默认模型；embedding 只产生记忆向量。模型列表由接口地址和对应 key 获取，不代表列表中所有模型都支持当前任务。
+主模型负责聊天和工具循环；summary 独立负责历史压缩，默认关闭思考；fast 是五类辅助 JSON 调用的默认模型；embedding 只产生记忆向量。模型列表由接口地址和对应 key 获取，不代表列表中所有模型都支持当前任务。
 
 适用范围：全局默认，可在 agent 的 main 或 models 覆盖；保存并重启。
 
@@ -84,7 +84,7 @@
 ### 请求协议等参数的处理流程
 
 1. 先由 agentConfig 合并该 agent 的有效模型配置。主模型交给 PiExecutor；query、maintenance、emotion、rerank、spark 分别把自己的字段覆盖在 fast 上；embedding 单独使用向量模型。
-2. 每个模型槽位通过 protocol 选择 Responses 或 Chat Completions。主模型由 Pi 转换工具和消息；辅助模型发送用途指令与本次材料，要求 JSON；摘要沿用主模型协议，向量模型始终走 embeddings。Responses 设置 store:false，每次完整传入编排材料，不接远端会话。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。
+2. 每个模型槽位通过 protocol 选择 Responses 或 Chat Completions。主模型由 Pi 转换工具和消息；辅助模型发送用途指令与本次材料，要求 JSON；摘要使用 summary 模型协议，向量模型始终走 embeddings。Responses 设置 store:false，每次完整传入编排材料，不接远端会话。列表读取是独立 /models 请求，不会验证模型是否支持全部功能。
 3. 模型设置不由运行结果回写。辅助结果由记忆或心情模块接收，影响本轮回忆或下一轮状态。
 
 实现位置：`src/config/schema.ts · agentConfig`；`src/shared/models.ts · OpenAIModels.model / json / embed`；`src/layer4/pi.ts · PiExecutor`。
@@ -97,7 +97,7 @@
 
 **调整结果。** 主模型、历史压缩和辅助 JSON 请求按各自模型槽位选择协议；向量仍走 /embeddings。保存并重启生效。新模型建议用 Responses，仅支持旧接口的服务可选 Chat。不会启用远端会话或改变人格。
 
-**具体影响。** responses（默认）或 chat-completions。主调用和辅助调用各自使用槽位协议；压缩沿用主模型。Responses 使用 store:false，不使用远端会话 ID。向量忽略此项。保存并重启生效。
+**具体影响。** responses（默认）或 chat-completions。主调用和辅助调用各自使用槽位协议；压缩使用独立 summary 模型。Responses 使用 store:false，不使用远端会话 ID。向量忽略此项。保存并重启生效。
 
 **处理过程。** 见本组“请求协议等参数的处理流程”，该参数在上述具体步骤使用。
 
@@ -153,7 +153,7 @@
 
 **调整结果。** 调低会更早压缩历史，调高能留更多原文，但必须符合服务商真实容量。辅助和向量模型这里的数值目前不控制请求大小。
 
-**具体影响。** 主模型预算计算使用的窗口大小。填大不会扩展服务商限制；辅助/embedding 槽位的此项目前不限制请求。
+**具体影响。** 主模型预算与压缩模型分批使用的窗口大小。填大不会扩展服务商限制；其他辅助/embedding 槽位的此项目前不限制请求。
 
 **处理过程。** 见本组“请求协议等参数的处理流程”，该参数在上述具体步骤使用。
 
@@ -167,7 +167,7 @@
 
 **调整结果。** 太小可能让回答或辅助判断写不完；更大只是允许写长，不强迫长篇回答。历史摘要另看 history.summaryTokens，向量模型不使用此项。
 
-**具体影响。** 主模型或辅助 JSON 调用的总输出 token 上限，推理可能占用其中一部分。历史摘要请求取 main.maxOutput 与 history.summaryTokens 较大值；摘要实际保留文字仍受 summaryTokens 限制。embedding 忽略此项。
+**具体影响。** 主模型或辅助 JSON 调用的总输出 token 上限，推理可能占用其中一部分。历史摘要请求取 summary.maxOutput 与 history.summaryTokens 较大值；摘要实际保留文字仍受 summaryTokens 限制。embedding 忽略此项。
 
 **处理过程。** 见本组“请求协议等参数的处理流程”，该参数在上述具体步骤使用。
 
@@ -179,9 +179,9 @@
 
 **含义。** 主对话、历史压缩和辅助模型分别使用所属模型卡片的设置；辅助用途缺省继承 fast。
 
-**调整结果。** low 等档位在 Responses 中发送 reasoning.effort，在 Chat 中发送 reasoning_effort。更高可能更慢、费用更高。辅助请求与压缩设置 off 时不附加推理参数，服务端可能仍默认开启思考；不支持推理参数的模型应选 off。保存并重启后生效。
+**调整结果。** low 等档位在 Responses 中发送 reasoning.effort，在 Chat 中发送 reasoning_effort。更高可能更慢、费用更高。压缩模型默认 off；DeepSeek 摘要 off 显式传 none，其他模型 off 不附加参数，服务端可能仍默认开启思考；不支持推理参数的模型应选 off。保存并重启后生效。
 
-**具体影响。** 主对话和摘要使用 main 的推理强度；辅助请求使用各用途覆盖或 fast 的推理强度。辅助与摘要的 off 不发送参数，遵循服务端默认；向量不使用此项。
+**具体影响。** 主对话使用 main；摘要使用 summary，默认 off；辅助用途继承 fast。DeepSeek 摘要 off 显式发送 none；其他模型 off 不发送推理参数，按接口默认处理。向量忽略此项。
 
 **处理过程。** 见本组“请求协议等参数的处理流程”，该参数在上述具体步骤使用。
 
@@ -203,7 +203,7 @@
 
 ## history
 
-第二层从旧摘要检查点接上后续原文；工具结果只取尾部进入历史视图。超过阈值才调用 main 批量压缩较早部分。压缩不改原始 JSONL；新输入取消未交接回复时会删除对应原文。
+第二层从旧摘要检查点接上后续原文；工具结果只取尾部进入历史视图。超过阈值才调用 summary 批量压缩较早部分。压缩不改原始 JSONL；新输入取消未交接回复时会删除对应原文。
 
 适用范围：历史预算和 pollMs 均按当前 agent 生效。保存并重启。
 
@@ -211,7 +211,7 @@
 
 1. ContextBuilder.build 调用 History.view：从数据库的 history:<agent_id> 读取已压缩到哪个事件（through）和累计摘要（summary），再读取 through 之后的事件。投递确认和 run_finished 不加入这份历史。
 2. History.render 保留事件时间、来源、发言人、正文和附件说明；旧工具结果只取末尾 toolTailTokens。估算“旧摘要＋剩余原文”的 token 数。
-3. 超过 triggerTokens 时，从最新内容往前尽量留出 targetTokens−summaryTokens 的原文空间，其余较早事件分批交给 main 模型总结，输入同时包含旧摘要和最终摘要 token 预算；请求总输出额度取 summaryTokens 与 models.main.maxOutput 的较大值，避免推理先耗尽摘要额度。只接受完整 JSON 和未超过保留预算的摘要；不完整或超限不推进检查点。总结成功后把新的 through/summary 写回数据库；原始 JSONL 不改。
+3. 超过 triggerTokens 时，从最新内容往前尽量留出 targetTokens−summaryTokens 的原文空间，其余较早事件分批交给 summary 模型总结，输入同时包含旧摘要和最终摘要 token 预算；请求总输出额度取 summaryTokens 与 models.summary.maxOutput 的较大值，避免推理先耗尽摘要额度。只接受完整 JSON 和未超过保留预算的摘要；超长或格式错误最多重写三次，仍失败不推进检查点。总结成功后把新的 through/summary 写回数据库；原始 JSONL 不改。
 4. 最后把累计摘要和保留原文交给第三层，以摘要消息和原有user/assistant消息排列在动态背景之前。下一轮从新 through 接续，而不是再总结全部历史。
 
 实现位置：`src/layer2/history.ts · History.render / view`；`src/shared/models.ts · OpenAIModels.summarize`；`src/layer3/context.ts · ContextBuilder.build`。
@@ -252,7 +252,7 @@
 
 **调整结果。** 调大能容纳更多旧事和未完成事项，但摘要也会占用近期原文的空间；太小可能让总结不完整。这不是压缩前允许读取的长度。
 
-**具体影响。** 滚动摘要最终保留的文字 token 上限。摘要请求的总输出额度取它与 models.main.maxOutput 的较大值，为推理和 JSON 留空间；输出仍须完整且文字不超此值，否则不推进压缩检查点。保留重要事件、修正、未完成事项和工具结果。
+**具体影响。** 滚动摘要最终保留的文字 token 上限。摘要请求的总输出额度取它与 models.summary.maxOutput 的较大值，为推理和 JSON 留空间；输出仍须完整且文字不超此值，否则不推进压缩检查点。保留重要事件、修正、未完成事项和工具结果。
 
 **处理过程。** 见本组“历史多大时开始压缩等参数的处理流程”，该参数在上述具体步骤使用。
 
@@ -466,6 +466,14 @@
 
 实现位置：`src/layer3/context.ts · ContextBuilder.build`；`src/layer3/memory.ts · recall / search`；`src/shared/models.ts · json / embed`。
 
+### 感受侧占多少召回名额等参数的处理流程
+
+1. 本轮输入与近期用户发言生成感受query，与事实query并行；不传state或人格。规则在prompts/auxiliary.yaml的feelingQuery。
+2. 对labels+feeling索引计算文字与向量相关性。两路各过门槛，同ID合并取较高RRF分，候选及选中数量按feelingShare分配名额，不足可补；再按原状态倍率、重排、去重、时间邻居和预算截取。情绪权重仍是原有排序因素，不用于生成感受query。
+3. 失败或空query只跳过感受路线；旧索引升级后需要一次向量化，未就绪先用文字检索。试算使用隔离快照，不改变索引或激活。
+
+实现位置：`src/layer3/memory.ts · feelingQuery / search / sync`；`src/layer3/memory-ranking.ts · synchronizeMemoryIndex`。
+
 ### 搜索第一名比后面强多少等参数的处理流程
 
 1. 先算文字匹配和语义匹配的两个名次：R=1/(rrfK+文字名次)+1/(rrfK+语义名次)，名次从 1 开始。
@@ -495,7 +503,7 @@
 ### 为每条记忆写一句查找线索等参数的处理流程
 
 1. sync(false) 读 memory.json，按条目内容和向量模型签名检查变化，更新搜索用的文字副本。原文变化或向量模型变化会使相应旧描述/向量失效，但仅修改分片参数不会重做已有向量。
-2. sync(true) 按 maintenanceBatchItems 分批、批内逐条处理缺少向量的记忆。searchDescription 开启且还没描述时，给 maintenance 模型完整条目，取 search_text 的前 descriptionTokens。
+2. sync(true) 按 maintenanceBatchItems 分批维护缺少向量的条目。事实检索描述只给summary/details/people/agent_name，不给emotion；感受侧直接切片labels+feeling，不调用描述模型。两侧保存在同一索引对象，原文不复制成两条记忆。
 3. 把“检索描述＋原记忆文字”按 chunkTokens 和 chunkOverlap 切片，再调用 embedding；一批最多 20 个片段。单条受 maintenanceTimeoutMs 限制，成功结果写入 .runtime/search-index.json；失败记日志，保留 memory.json。
 4. daily 由定时脚本调用；debounced 由后台每 pollSeconds 检查文件修改时间，静置超过 debounceSeconds 后调用。自带每日维护在 debounced 模式仍会执行。
 
@@ -543,6 +551,76 @@
 **具体影响。** 启用时先调用 query 辅助模型生成线索；失败退回原查询。关闭则直接用最近对话材料检索。
 
 **处理过程。** 见本组“先让小模型想想该查什么等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 每轮选记忆时或后台整理时使用，具体时机见上面的说明。这些是固定规则；变化的是记忆文件、检索用的副本和每条记忆的评分。
+
+### 感受侧占多少召回名额 · feelingShare
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `memory.feelingShare`。默认：`0.5`。
+
+**含义。** 默认0.5，事实侧使用剩余比例；总数仍由maxItems控制。
+
+**调整结果。** 例如maxItems=8时先各取4条；同ID只占一侧名额，缺额可由另一侧补。候选池也按此比例分配；之后时间邻居、联想和预算可能改变最终组成。
+
+**具体影响。** 两侧按名额分配，0.5即各半；共用maxItems总量，重复不占两个名额，缺额补足。时间联系与预算仍在之后执行。
+
+**处理过程。** 见本组“感受侧占多少召回名额等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 每轮选记忆时或后台整理时使用，具体时机见上面的说明。这些是固定规则；变化的是记忆文件、检索用的副本和每条记忆的评分。
+
+### 用处境和感受找回另一批记忆 · feelingRecall
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `memory.feelingRecall`。默认：`true`。
+
+**含义。** 同一memory条目维护事实与感受两套向量；感受侧只索引emotion.labels和emotion.feeling。
+
+**调整结果。** 开启后每轮并行生成感受query，不读state、persona或旧focus。两侧命中按ID合并，取较高的相关分，再走原排序和时间联系；关闭只停用感受侧，不删除索引。
+
+**具体影响。** 同一条记忆同时维护事实和感受索引。只影响自动召回；memory_search工具保留原事实搜索。两侧合并后共用所有后续参数。
+
+**处理过程。** 见本组“感受侧占多少召回名额等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 每轮选记忆时或后台整理时使用，具体时机见上面的说明。这些是固定规则；变化的是记忆文件、检索用的副本和每条记忆的评分。
+
+### 感受查询能读多少材料 · feelingInputTokens
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `memory.feelingInputTokens`。默认：`1800`。
+
+**含义。** 从本轮输入与近期用户发言组成的材料开头截取，默认1800 token。
+
+**调整结果。** 扩大可提供更多指代背景，也可能带进旧话题；仍受queryInputTokens材料总量约束。与事实query并行，共用models.query、queryTimeoutMs和缓存时长。
+
+**具体影响。** 感受query读取本轮与近期用户输入的容量，不传入当前情绪或人格；事实query保持原流程。
+
+**处理过程。** 见本组“感受侧占多少召回名额等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 每轮选记忆时或后台整理时使用，具体时机见上面的说明。这些是固定规则；变化的是记忆文件、检索用的副本和每条记忆的评分。
+
+### 感受线索保留多长 · feelingQueryTokens
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `memory.feelingQueryTokens`。默认：`160`。
+
+**含义。** 小模型返回feeling_query后最多保留160 token，空字符串就跳过这一路。
+
+**调整结果。** 只影响感受搜索文本，不改变记忆正文、情绪数值或最终回答长度；提示词在个人prompts/auxiliary.yaml的feelingQuery。
+
+**具体影响。** 截取小模型返回的feeling_query；为空或失败跳过感受侧，不替换事实query。
+
+**处理过程。** 见本组“感受侧占多少召回名额等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 每轮选记忆时或后台整理时使用，具体时机见上面的说明。这些是固定规则；变化的是记忆文件、检索用的副本和每条记忆的评分。
+
+### 感受检索的相似门槛 · feelingVectorThreshold
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `memory.feelingVectorThreshold`。默认：`0.25`。
+
+**含义。** 默认0.25；感受文字有重合或向量相似度高于此值才入候选。
+
+**调整结果。** 提高会减少宽泛感受命中，降低会多带回情境较远的回忆。之后仍共用candidates、maxItems、遗忘和排序参数，不额外占一份名额。
+
+**具体影响。** 感受侧独立相关门槛；同ID只入选一次，两侧相关分取较高值，原状态倍率只乘一次。
+
+**处理过程。** 见本组“感受侧占多少召回名额等参数的处理流程”，该参数在上述具体步骤使用。
 
 **更新与下一轮。** 每轮选记忆时或后台整理时使用，具体时机见上面的说明。这些是固定规则；变化的是记忆文件、检索用的副本和每条记忆的评分。
 
@@ -2076,7 +2154,7 @@
 ### 启动自动提醒脚本等参数的处理流程
 
 1. Scheduler 为每个启用的 agent 启动自己的脚本进程；读取其独立 config.yaml，安排自己的每日维护、做梦和随机机会。脚本带 agent_id 向同一个 /v1/events 提交事件。
-2. 随机等待分钟数=min+Math.random()×(max−min)；到期按 timezone 算当前小时，只有 activeStart≤小时<activeEnd 才向 /v1/events 发 internal_event。然后重新抽下一段等待。
+2. 随机等待分钟数=min+Math.random()×(max−min)；到期按 timezone 算当前小时，只有 activeStart≤小时<activeEnd 才检查leisureDailyLimit并按moyuWeight/chatWeight/quietWeight抽签。安静不提交事件；摸鱼只提供Skill路径，纯聊提供randomGreeting；然后重新抽下一段等待。
 3. 内部事件带基础提示文字，进入第二层普通触发流程，再经过第三层和第四层；模型可选择沉默。参数不是每秒回写的状态；重启脚本会重新抽时间，不保存下次触发点或补跑错过事件。
 
 实现位置：`src/scheduler.ts · Scheduler`；`scripts/schedule.ts · cron / event / arm`；`src/layer2/runtime.ts · ingress`。
@@ -2123,15 +2201,71 @@
 
 **更新与下一轮。** 自带定时脚本启动时读取，再按规则等待和触发。每次重启重新抽随机时间；这些规则不会自动改写。
 
-### 偶尔主动来聊一聊 · randomChat
+### 偶尔出去逛逛或来聊天 · randomChat
 
 保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `scheduler.randomChat`。默认：`true`。
 
-**含义。** 脚本随机等一段时间，再给 agent 一个考虑是否联系你的机会。
+**含义。** schedule.ts随机等待，再按下面的权重选摸鱼、纯聊或安静。
 
-**调整结果。** 关闭就不发这种机会；打开也不保证一定给你发消息，模型可以判断没事可说并保持沉默。
+**调整结果。** 关闭停止这整个随机计时器，不影响记忆整理、梦境和一次性提醒。
 
-**具体影响。** 默认脚本是否给启用的 agent 安排随机聊天机会；机会到来后模型仍可沉默。
+**具体影响。** 开启摸鱼/纯聊共用的随机计时器；到点按权重决定事件或安静。
+
+**处理过程。** 见本组“启动自动提醒脚本等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 自带定时脚本启动时读取，再按规则等待和触发。每次重启重新抽随机时间；这些规则不会自动改写。
+
+### 每天随机机会总上限 · leisureDailyLimit
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `scheduler.leisureDailyLimit`。默认：`5`。
+
+**含义。** 每天最多抽几次随机机会，包含安静和提交失败；0表示不设次数上限，此时不读写每日计数。按timezone换日，个人.runtime/leisure-state.json只记日期与次数；重启保留次数。手动触发不计数。
+
+**调整结果。** 写在当前agent的config.yaml的scheduler；保存后重启定时脚本。只改变触发机会，不直接改人格或情绪Prompt。
+
+**具体影响。** 每天最多抽几次随机机会，包含安静和提交失败；0表示不设次数上限，此时不读写每日计数。按timezone换日，个人.runtime/leisure-state.json只记日期与次数；重启保留次数。手动触发不计数。
+
+**处理过程。** 见本组“启动自动提醒脚本等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 自带定时脚本启动时读取，再按规则等待和触发。每次重启重新抽随机时间；这些规则不会自动改写。
+
+### 摸鱼机会权重 · moyuWeight
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `scheduler.moyuWeight`。默认：`65`。
+
+**含义。** 到点后抽到摸鱼的相对权重；概率=此值÷三项权重之和。只发读moyu Skill的事件，不执行Skill脚本；未安装Skill时回到纯聊天。
+
+**调整结果。** 写在当前agent的config.yaml的scheduler；保存后重启定时脚本。只改变触发机会，不直接改人格或情绪Prompt。
+
+**具体影响。** 到点后抽到摸鱼的相对权重；概率=此值÷三项权重之和。只发读moyu Skill的事件，不执行Skill脚本；未安装Skill时回到纯聊天。
+
+**处理过程。** 见本组“启动自动提醒脚本等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 自带定时脚本启动时读取，再按规则等待和触发。每次重启重新抽随机时间；这些规则不会自动改写。
+
+### 纯聊天机会权重 · chatWeight
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `scheduler.chatWeight`。默认：`20`。
+
+**含义。** 到点后抽到原有randomGreeting纯聊天的相对权重；不读取摸鱼Skill。三项都为0时安静。
+
+**调整结果。** 写在当前agent的config.yaml的scheduler；保存后重启定时脚本。只改变触发机会，不直接改人格或情绪Prompt。
+
+**具体影响。** 到点后抽到原有randomGreeting纯聊天的相对权重；不读取摸鱼Skill。三项都为0时安静。
+
+**处理过程。** 见本组“启动自动提醒脚本等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 自带定时脚本启动时读取，再按规则等待和触发。每次重启重新抽随机时间；这些规则不会自动改写。
+
+### 安静机会权重 · quietWeight
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `scheduler.quietWeight`。默认：`15`。
+
+**含义。** 到点后不提交事件的相对权重；安静也计入当日机会数，主模型不会被叫醒。
+
+**调整结果。** 写在当前agent的config.yaml的scheduler；保存后重启定时脚本。只改变触发机会，不直接改人格或情绪Prompt。
+
+**具体影响。** 到点后不提交事件的相对权重；安静也计入当日机会数，主模型不会被叫醒。
 
 **处理过程。** 见本组“启动自动提醒脚本等参数的处理流程”，该参数在上述具体步骤使用。
 
@@ -2769,7 +2903,7 @@ channel 选已配置渠道，conversation 是平台聊天 ID，thread 是可选�
 
 ## prompts
 
-支持 system、query、searchDescription、rerank、emotion、spark、stateExpression。system 覆盖个人 system.md；其他覆盖个人 auxiliary.yaml 同名规则。stateExpression 直接解释主模型状态；辅助调用须保留所要求的 JSON 字段。
+支持 system、query、feelingQuery、searchDescription、rerank、emotion、spark、stateExpression。system 覆盖个人 system.md；其他覆盖个人 auxiliary.yaml 同名规则。stateExpression 直接解释主模型状态；辅助调用须保留所要求的 JSON 字段。
 
 适用范围：可按 agent 覆盖；配置中的覆盖保存并重启。删除键恢复文件或代码内默认提示词。
 
@@ -2799,9 +2933,9 @@ channel 选已配置渠道，conversation 是平台聊天 ID，thread 是可选�
 
 保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `prompts.summary`。默认：可选；未设置时按继承/调用规则处理。
 
-**含义。** 主模型读取 conversation_to_summarize 中的资料，写历史摘要，不参与旧聊天。
+**含义。** 压缩模型 summary 读取 conversation_to_summarize 中的资料，写历史摘要，不参与旧聊天。
 
-**调整结果。** 默认读取个人 prompts/auxiliary.yaml 的 summary；只返回包含非空 summary 字符串的 JSON。程序提取文本保存为摘要，格式错误或截断时保留原检查点，不把旧对话的续写当成摘要。
+**调整结果。** 默认读取个人 prompts/auxiliary.yaml 的 summary；只返回包含非空 summary 字符串的 JSON。程序提取文本保存为摘要，格式错误或截断时保留原检查点；普通压缩失败，本轮保留已有摘要和未压缩原文，下轮再试。超出模型容量时仍须压缩成功。不会把旧对话的续写当成摘要。
 
 **具体影响。** 历史整理规则，读个人 auxiliary.yaml。输入是结构化历史资料，只返回 {"summary":"..."}；不回复旧对话。格式错误不推进压缩检查点。
 
@@ -2818,6 +2952,20 @@ channel 选已配置渠道，conversation 是平台聊天 ID，thread 是可选�
 **调整结果。** 可以要求更关注人物、事件或未完成事项；结果必须保留 queries 数组，程序靠它搜索，不会把这段指令直接发给主聊天模型。
 
 **具体影响。** 替换查询线索提示词，要求返回 queries 数组；最近对话在输入里，不要改掉消费字段。
+
+**处理过程。** 见本组“基础行为要求等参数的处理流程”，该参数在上述具体步骤使用。
+
+**更新与下一轮。** 对应模型请求发出前读取这份规则。你修改的是固定指令；每次请求的聊天、记忆和状态材料另外填入，不会反过来改写这份规则。
+
+### 怎样提取感受线索 · feelingQuery
+
+保存位置：agents/<id>/config.yaml（根文件保留公共默认值） → `prompts.feelingQuery`。默认：可选；未设置时按继承/调用规则处理。
+
+**含义。** 根据本轮和近期用户输入生成用于搜索主观经历的短句，不读取当前情绪。
+
+**调整结果。** 必须返回feeling_query字符串；无依据可为空。使用models.query，缓存与超时同事实查询；原文不作为感受query的失败回退。
+
+**具体影响。** 替换感受查询规则，要求返回feeling_query字符串；空值跳过这一路。只接收输入及部分近期用户发言。
 
 **处理过程。** 见本组“基础行为要求等参数的处理流程”，该参数在上述具体步骤使用。
 

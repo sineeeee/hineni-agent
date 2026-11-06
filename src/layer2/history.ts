@@ -1,6 +1,6 @@
 import { localMoment } from "../shared/time-context.js";
 import type { Event, ModelMessage } from "../contracts/index.js";
-import type { Config } from "../config/schema.js";
+import { summaryModelConfig, type Config } from "../config/schema.js";
 import type { Intelligence } from "../shared/models.js";
 import { tokens, tail, cut, chunks } from "../shared/tokens.js";
 import { Store } from "./store.js";
@@ -259,6 +259,7 @@ export class History {
     signal?: AbortSignal,
     forcedTarget?: number,
     exclude = new Set<string>(),
+    manual?: { onBatch: (completed: number) => void },
   ) {
     let checkpoint = this.db.get(`history:${agent}`, {
       through: 0,
@@ -278,7 +279,8 @@ export class History {
     const size = tokens(checkpoint.summary + rows.join("\n"));
     const target = forcedTarget ?? this.cfg.history.targetTokens;
     if (
-      size > (forcedTarget ?? this.cfg.history.triggerTokens) &&
+      (manual !== undefined ||
+        size > (forcedTarget ?? this.cfg.history.triggerTokens)) &&
       events.length > 0
     ) {
       let keep = 0,
@@ -305,31 +307,64 @@ export class History {
       const old = rows.slice(0, split);
       let summary = checkpoint.summary;
       let batch = "";
+      let completed = 0;
+      const summaryModel = summaryModelConfig(this.cfg);
       const batchMax = Math.min(
         100000,
-        this.cfg.models.main.contextWindow -
-          this.cfg.models.main.maxOutput -
+        summaryModel.contextWindow -
+          Math.max(summaryModel.maxOutput, this.cfg.history.summaryTokens) -
           this.cfg.context.safetyTokens -
           this.cfg.history.summaryTokens,
       );
-      for (const row of old)
-        for (const piece of chunks(row, batchMax, 0)) {
-          if (tokens(batch) + tokens(piece) > batchMax && batch) {
-            summary = await this.llm.summarize(
-              summary + "\n" + batch,
-              this.cfg.history.summaryTokens,
-              signal,
-            );
-            batch = "";
+      try {
+        manual?.onBatch(0);
+        for (const row of old)
+          for (const piece of chunks(row, batchMax, 0)) {
+            if (tokens(batch) + tokens(piece) > batchMax && batch) {
+              summary = await this.llm.summarize(
+                summary + "\n" + batch,
+                this.cfg.history.summaryTokens,
+                signal,
+              );
+              manual?.onBatch(++completed);
+              batch = "";
+            }
+            batch += piece + "\n";
           }
-          batch += piece + "\n";
+        if (batch) {
+          summary = await this.llm.summarize(
+            summary + "\n" + batch,
+            this.cfg.history.summaryTokens,
+            signal,
+          );
+          manual?.onBatch(++completed);
         }
-      if (batch)
-        summary = await this.llm.summarize(
-          summary + "\n" + batch,
-          this.cfg.history.summaryTokens,
-          signal,
+      } catch (error) {
+        signal?.throwIfAborted();
+        // Hard capacity compaction must succeed; routine compaction can wait.
+        if (
+          manual !== undefined ||
+          forcedTarget !== undefined ||
+          (error instanceof Error && error.name === "AbortError")
+        )
+          throw error;
+        this.db.log(
+          "warn",
+          "history",
+          "Compaction deferred; retaining uncompressed history",
+          {
+            agent,
+            error: error instanceof Error ? error.message : String(error),
+            through: checkpoint.through,
+            history_tokens: size,
+          },
         );
+        return (
+          (checkpoint.summary
+            ? "[Earlier history summary]\n" + checkpoint.summary + "\n"
+            : "") + rows.join("\n\n")
+        );
+      }
       signal?.throwIfAborted();
       checkpoint = { through: events[split - 1].seq, summary };
       this.db.set(`history:${agent}`, checkpoint);

@@ -1,7 +1,5 @@
 /** Editable scheduling policy. POST events; the second layer handles interruption and routing. */
 import fs from "node:fs";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -85,43 +83,28 @@ function cron(expression: string, job: () => Promise<void>) {
 }
 const randomGreeting =
   "我想把自己感兴趣的一个小想法分享给对方。直接讲内容，让这个想法自己成立；讲完就好，不用附带对对方生活的安排或要求。对方没有发来新消息，也不用对方接话来完成这次分享。没有新内容就安静。";
-const runFile = promisify(execFile);
+// Scheduling owns frequency, mode and daily quota; Skills own execution.
 async function leisureEvent(id: string, manual = false) {
-  const dir = path.join(store.agentRoot(id), "skills", "moyu");
-  const dice = path.join(dir, "scripts", "dice.py");
-  if (!fs.existsSync(dice) || !fs.existsSync(path.join(dir, "SKILL.md"))) {
+  let kind = "moyu";
+  if (!manual) {
+    const { takeLeisureOpportunity } = await import(
+      pathToFileURL(path.join(root, "src/shared/leisure.ts")).href
+    );
+    kind = await takeLeisureOpportunity(
+      path.join(store.agentRoot(id), ".runtime", "leisure-state.json"),
+      cfg.scheduler,
+    );
+  }
+  if (kind === "quiet") return;
+  if (kind === "chat") return event(id, randomGreeting, "random_chat");
+  const skill = path.join(store.agentRoot(id), "skills", "moyu", "SKILL.md");
+  if (!fs.existsSync(skill)) {
     if (manual) throw Error("Install skills/moyu first");
     return event(id, randomGreeting, "random_chat");
   }
-  const { stdout } = await runFile(
-    "python3",
-    [dice, manual ? "next" : "opportunity"],
-    {
-      timeout: 10000,
-      env: { ...process.env, MOYU_TIMEZONE: cfg.scheduler.timezone },
-    },
-  );
-  const choice = JSON.parse(stdout);
-  if (choice.kind === "quiet") return;
-  if (choice.kind === "chat") return event(id, randomGreeting, "random_chat");
-  if (
-    choice.kind !== "moyu" ||
-    !Array.isArray(choice.sources) ||
-    !choice.sources.length
-  )
-    throw Error("Invalid leisure decision");
-  const ids = choice.sources.map((s: any) => s.id);
-  if (
-    !ids.every((s: unknown) => typeof s === "string" && /^[a-z0-9_-]+$/.test(s))
-  )
-    throw Error("Invalid source codes");
-  const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
-  const command = ["python3", path.join(dir, "scripts", "fetch.py"), ...ids]
-    .map(quote)
-    .join(" ");
   await event(
     id,
-    `忽然想出去逛逛，看看有没有自己喜欢、也想带回来和对方聊的东西。这不是对方发来的消息。先阅读 ${path.join(dir, "SKILL.md")}，再运行 ${command}。本轮来源已选好：${choice.sources.map((s: any) => s.name).join("、")}。从真实内容里挑一两件自己有感受的，自然说就好；没有值得分享的就安静。`,
+    `忽然想出去逛逛，看看有没有自己喜欢、也想带回来和对方聊的东西。这不是对方发来的消息。阅读 ${skill}，按里面的方法选来源、读取真实内容。从里面挑一两件自己有感受的，自然说就好；没有值得分享的就安静。`,
     "moyu_browse",
   );
 }
@@ -155,7 +138,7 @@ if (onceIndex !== -1) {
       if (effective.memory.reviewEnabled)
         await event(
           agent.id,
-          `现在进入每日整理时间。请阅读 personal-memory Skill，整理尚未处理的聊天经历，更新自己的 memory.json；这是后台整理，通常安静完成；只有需要用户处理的问题才联系他，不把整理步骤发进闲聊。每批约 ${effective.memory.reviewBatchTokens} token，最多 ${effective.memory.maxReviewItems} 条，回看 ${effective.memory.reviewOverlap} 条前文。${effective.memory.noveltyAttention ? "留意意外、变化与熟悉的小事。" : ""}${Math.random() < effective.memory.smallDetailProbability ? "这次可以额外保留最多 " + effective.memory.smallDetailMax + " 条有意思的小细节。" : ""}`,
+          `现在安静回顾一下自己的生活。先读 personal-memory Skill，先看生活日记，再对照尚未处理的聊天和工具记录；挑真正想留下的经历，用自己的口气写，不照抄工作SOP，没有值得记的就不添加。遵守Skill的必填字段、事实与感受分工、长度及整理游标限制，更新自己的 memory.json；这是后台整理，通常安静完成；只有需要用户处理的问题才联系他，不把整理步骤发进闲聊。每批约 ${effective.memory.reviewBatchTokens} token，最多 ${effective.memory.maxReviewItems} 条，回看 ${effective.memory.reviewOverlap} 条前文。${effective.memory.noveltyAttention ? "留意意外、变化与熟悉的小事。" : ""}${Math.random() < effective.memory.smallDetailProbability ? "本批条数上限内，可以保留最多 " + effective.memory.smallDetailMax + " 条有意思的小细节。" : ""}`,
           "memory_review",
         );
     });
@@ -163,7 +146,7 @@ if (onceIndex !== -1) {
       cron(cfg.scheduler.dreamCron, () =>
         event(
           agent.id,
-          "可以阅读 dream-diary Skill，用近期记忆做一段轻量联想。是否分享由你决定，想象与真实经历分清。",
+          "想把最近几天的片段编成一小段自己的故事。先读 dream-diary Skill，从真实记忆取材，写温柔、好奇、有一点异想天开的第一人称短文；遵守正文长度和写作规则，保存在自己的梦境目录。没有合适片段就略过，是否分享自己决定；创作不回填真实记忆。这不是用户的新消息。",
           "dream",
         ),
       );

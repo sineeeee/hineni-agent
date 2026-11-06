@@ -58,6 +58,7 @@ export const ConfigSchema = z
         embedding: model.default(() =>
           model.parse({ name: "text-embedding-3-small", maxOutput: 1 }),
         ),
+        summary: model.default(() => model.parse({})),
         query: modelOverride.optional(),
         maintenance: modelOverride.optional(),
         emotion: modelOverride.optional(),
@@ -67,6 +68,7 @@ export const ConfigSchema = z
       .strict()
       .default(() => ({
         main: model.parse({}),
+        summary: model.parse({}),
         fast: model.parse({ name: "gpt-4.1-mini", maxOutput: 2000 }),
         embedding: model.parse({
           name: "text-embedding-3-small",
@@ -118,6 +120,11 @@ export const ConfigSchema = z
     memory: z
       .object({
         enabled: flag(),
+        feelingRecall: flag(),
+        feelingShare: z.number().min(0).max(1).default(0.5),
+        feelingInputTokens: n(1800, 100),
+        feelingQueryTokens: n(160, 10),
+        feelingVectorThreshold: z.number().min(0).max(1).default(0.25),
         queryRecentMessages: n(8, 1),
         queryInputTokens: n(2500, 100),
         queryTimeoutMs: n(8000, 100),
@@ -272,6 +279,10 @@ export const ConfigSchema = z
         script: z.string().default("schedule.ts"),
         timezone: z.string().default("Asia/Shanghai"),
         randomChat: flag(),
+        leisureDailyLimit: z.number().int().min(0).default(5),
+        moyuWeight: n(65),
+        chatWeight: n(20),
+        quietWeight: n(15),
         randomMinMinutes: n(60, 1),
         randomMaxMinutes: n(180, 1),
         activeStart: n(8),
@@ -391,13 +402,14 @@ export function parseConfig(raw: unknown): Config {
   for (const d of Object.values(c.drives))
     if (d.min > d.baseline || d.baseline > d.max)
       throw Error("Invalid drive bounds");
+  const summary = summaryModelConfig(c);
   if (
     c.history.summaryTokens +
-      c.models.main.maxOutput +
+      Math.max(summary.maxOutput, c.history.summaryTokens) +
       c.context.safetyTokens >=
-    c.models.main.contextWindow
+    summary.contextWindow
   )
-    throw Error("旧摘要预算、模型输出和安全余量之和必须小于主模型上下文容量");
+    throw Error("旧摘要预算、模型输出和安全余量之和必须小于压缩模型上下文容量");
   if (c.memory.chunkOverlap >= c.memory.chunkTokens)
     throw Error("invalid memory chunk overlap");
   for (const a of c.agents)
@@ -469,4 +481,9 @@ export function agentConfig(config: Config, agent: AgentConfig): Config {
   const merged = merge(config, agent.overrides);
   if (agent.main) merged.models.main = { ...merged.models.main, ...agent.main };
   return parseConfig(merged);
+}
+
+/** Return the independent summary model after normal per-agent configuration merging. */
+export function summaryModelConfig(config: Config) {
+  return config.models.summary;
 }

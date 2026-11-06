@@ -12,8 +12,8 @@ function baseDescription(p: string) {
     return make(
       "skills",
       name === "SKILL.md" ? "摸鱼与分享" : name,
-      "摸鱼Skill：SKILL.md说明如何浏览和分享，config.json控制来源开关、摸鱼/纯聊/安静权重、日上限和抽站数量，scripts包含骰子与公开API/RSS读取脚本。state.json和抓取日志不代表已经发送。",
-      "Skill及config.json保存后下一次使用读取。间隔、活跃时段和总开关仍在个人config.yaml的scheduler，修改后重启定时脚本。仅需Python标准库，无登录或浏览器依赖。",
+      "摸鱼Skill：SKILL.md说明如何浏览和分享，选站规则和来源直接写在scripts/dice.py，scripts/fetch.py读取公开API/RSS。state.json和抓取日志不代表已经发送。",
+      "Skill和配套脚本修改后下一次使用生效。间隔、活跃时段、总开关、概率和每日上限在个人config.yaml的scheduler，修改后重启定时脚本。仅需Python标准库，无登录或浏览器依赖。",
       /\.(pyc|log|lock)$/.test(p) ||
         ["state.json", "last-edition.json", "fetch-log.jsonl"].includes(name),
     );
@@ -44,7 +44,7 @@ function baseDescription(p: string) {
     return make(
       "prompts",
       "辅助规则、历史整理与状态表达",
-      "summary 让主模型整理历史摘要、query 提炼查询、searchDescription 生成检索句、rerank 重排、emotion 评分、spark 生成本轮想象灵感、stateExpression 指导主模型表达。每个键是一段可编辑提示词；保留规定的 JSON 返回字段。",
+      "summary 让主模型整理历史摘要、query 提炼事实查询、feelingQuery 提炼感受查询、searchDescription 生成检索句、rerank 重排、emotion 评分、spark 生成本轮想象灵感、stateExpression 指导主模型表达。每个键是一段可编辑提示词；保留规定的 JSON 返回字段。",
       "个人文件保存后下次调用读取。config 的 prompts 同名覆盖优先；缺项用内置默认。数值范围与超时仍在配置表单。",
       p.startsWith("prompts/"),
     );
@@ -216,7 +216,7 @@ export function describeFile(p: string) {
       base.effect,
       [
         "auxiliaryPrompt 按配置覆盖 → 个人文件对应键 → 内置默认的顺序读取。文件为 YAML 映射，每项是一段提示词；UI 保存校验键名、类型与非空内容。",
-        "summary 输出非空 summary 字符串，历史资料放在 conversation_to_summarize 中，不继续旧聊天；query 输出 queries 数组；searchDescription 输出 search_text；rerank 输出 ids；emotion 输出 mood/emotions/drives/cause/thoughts/focus/memory_mentions；spark 输出spark字符串，空字符串表示不提供联想，不写记忆或状态。stateExpression 是直接给主模型的背景指导，不调用辅助模型。",
+        "summary 输出非空 summary 字符串，历史资料放在 conversation_to_summarize 中，不继续旧聊天；query 输出 queries 数组；feelingQuery 输出 feeling_query 字符串（可为空）；searchDescription 输出 search_text；rerank 输出 ids；emotion 输出 mood/emotions/drives/cause/thoughts/focus/memory_mentions；spark 输出spark字符串，空字符串表示不提供联想，不写记忆或状态。stateExpression 是直接给主模型的背景指导，不调用辅助模型。",
         "emotion 在整轮结束后读取本轮输入/结果，以及开跑前截取的最近最多五轮交流（连续输入与回复分段合为一轮，最多 2000 token 且不超过 state.inputTokens 的三分之一）；旧交流只帮助理解，不重复计分。cause 区分自己的感受与对用户的猜测，thoughts/focus 可为空。emotion 的 policy 自动包含允许名称、启用驱动力和数值限幅。评分先按分数给增量，程序再乘敏感度并限幅一次。模型与超时仍从 models/state/memory 配置读取；查询缓存到期才重算相同输入。",
       ],
       {},
@@ -354,7 +354,7 @@ export function describeFile(p: string) {
       "你或 agent 改脚本后，点“重启定时脚本”。脚本启动时重新读配置并重新抽随机等待；不补跑错过事件，不保存任务进度。",
       [
         "每日时间按 memory.sleepCron 计算：先调 memory/reindex，再按 reviewEnabled 发送要求读 personal-memory Skill 的整理提醒。提醒里填入批次大小、建议条数和小细节选项。",
-        "随机聊天抽取 min 到 max 分钟的等待，到期检查 activeStart/activeEnd；在时段内才把“此刻有一段空闲……”发到 /v1/events。做梦按 dreamCron 发 dream-diary 提醒。",
+        "随机聊天抽取 min 到 max 分钟的等待，到期检查 activeStart/activeEnd；在时段内按scheduler的日上限和权重决定摸鱼、纯聊或安静，前两者才发到 /v1/events。做梦按 dreamCron 发 dream-diary 提醒。",
         "收到的新事件存入第二层并触发同一套取消/编排/执行逻辑；没有后台小人格。自定义脚本只有读取某个配置字段，该字段才对它生效。",
       ],
       {},
@@ -369,22 +369,11 @@ export function describeFile(p: string) {
       base.purpose,
       base.effect,
       [
-        "个人schedule.ts到点执行scripts/dice.py，选摸鱼、原有纯聊或安静；安静不向第二层提交事件。",
-        "摸鱼事件给出SKILL.md和本轮fetch.py命令；主agent读Skill后抓取内容，正常记录工具结果，再选择分享或沉默。",
-        "只读公开API/RSS，配置每次重新读取；没有浏览器、账号管理和额外后台服务。",
+        "个人schedule.ts按自己config.yaml的scheduler选摸鱼、纯聊或安静，不执行Skill脚本。",
+        "摸鱼事件只给SKILL.md路径和浏览意愿；主agent读取Skill，再运行dice.py选站和fetch.py读取，工具结果照常记录，分享或沉默由主agent决定。",
+        "只读公开API/RSS，规则随Skill脚本提供；没有浏览器、账号管理和额外后台服务。",
       ],
-      {
-        dailyOpportunities:
-          "每天自动机会数上限，包含静默抽签；手动触发不占额度。",
-        weights: "moyu/chat/quiet相对权重，分别是摸鱼、原有纯聊、不提交事件。",
-        sourceCountMin: "每次最少抽几个站。",
-        sourceCountMax: "每次最多抽几个站，上限8。",
-        avoidRecentRolls: "优先避开最近几次来源，不足才复用。",
-        itemsPerSource: "每站读取候选上限，不是发送条数。",
-        requestTimeoutSeconds: "每次公开请求最多等待的秒数。",
-        sources:
-          "name名称、enabled开关、kind读取方式、url公开地址；kind可用rss/hn/lobsters/v2ex/bluesky。",
-      },
+      {},
       ["scripts/schedule.ts · leisureEvent", "templates/skills/moyu"],
     );
   if (p.includes("/skills/")) {

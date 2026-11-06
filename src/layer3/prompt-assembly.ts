@@ -20,7 +20,7 @@ export function assembleSystem(opts: {
 }) {
   const { cfg, agent, root, projectRoot, base, persona, skills } = opts;
   const rulesPersonaRaw =
-    "[Operating rules]\n" + base + "\n\n[Persona]\n" + persona;
+    "[Persona]\n" + persona + "\n\n[Operating rules]\n" + base;
   const rulesPersona = cut(rulesPersonaRaw, 4000);
   const projectRaw = `Application: Hineni (four-layer personal agent).\nDocumentation: ${path.join(root, "SYSTEM.md")} (your environment); ${projectRoot ? path.join(projectRoot, "docs/manual.md") : "See SYSTEM.md for project documentation"} (features); ${projectRoot ? path.join(projectRoot, "AGENTS.md") : "See SYSTEM.md"} (developer navigation).\nAgent root: ${root}\nWorkspace: ${path.join(root, "workspace")}\nMemory: ${path.join(root, "memory.json")}\nTargets: ${JSON.stringify(agent.targets)}\nSkills (read SKILL.md before use): ${JSON.stringify(skills)}`;
   const project = cut(projectRaw, 5000),

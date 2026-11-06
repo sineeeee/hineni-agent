@@ -63,6 +63,16 @@
           "reasoning": "off",
           "compat": {}
         },
+        "summary": {
+          "protocol": "responses",
+          "baseUrl": "https://api.openai.com/v1",
+          "apiKeyEnv": "OPENAI_API_KEY",
+          "name": "gpt-4.1",
+          "contextWindow": 1047576,
+          "maxOutput": 8192,
+          "reasoning": "off",
+          "compat": {}
+        },
         "fast": {
           "protocol": "responses",
           "baseUrl": "https://api.openai.com/v1",
@@ -246,6 +256,82 @@
             "name": "text-embedding-3-small",
             "contextWindow": 1047576,
             "maxOutput": 1,
+            "reasoning": "off",
+            "compat": {}
+          },
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "default": "responses",
+              "type": "string",
+              "enum": [
+                "responses",
+                "chat-completions"
+              ]
+            },
+            "baseUrl": {
+              "default": "https://api.openai.com/v1",
+              "type": "string",
+              "format": "uri"
+            },
+            "apiKeyEnv": {
+              "default": "OPENAI_API_KEY",
+              "type": "string"
+            },
+            "name": {
+              "default": "gpt-4.1",
+              "type": "string"
+            },
+            "contextWindow": {
+              "default": 1047576,
+              "type": "number",
+              "minimum": 100000
+            },
+            "maxOutput": {
+              "default": 8192,
+              "type": "number",
+              "minimum": 1
+            },
+            "reasoning": {
+              "default": "off",
+              "type": "string",
+              "enum": [
+                "off",
+                "minimal",
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "compat": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "protocol",
+            "baseUrl",
+            "apiKeyEnv",
+            "name",
+            "contextWindow",
+            "maxOutput",
+            "reasoning",
+            "compat"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "default": {
+            "protocol": "responses",
+            "baseUrl": "https://api.openai.com/v1",
+            "apiKeyEnv": "OPENAI_API_KEY",
+            "name": "gpt-4.1",
+            "contextWindow": 1047576,
+            "maxOutput": 8192,
             "reasoning": "off",
             "compat": {}
           },
@@ -558,7 +644,8 @@
       "required": [
         "main",
         "fast",
-        "embedding"
+        "embedding",
+        "summary"
       ],
       "additionalProperties": false
     },
@@ -693,6 +780,32 @@
         "enabled": {
           "default": true,
           "type": "boolean"
+        },
+        "feelingRecall": {
+          "default": true,
+          "type": "boolean"
+        },
+        "feelingShare": {
+          "default": 0.5,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "feelingInputTokens": {
+          "default": 1800,
+          "type": "number",
+          "minimum": 100
+        },
+        "feelingQueryTokens": {
+          "default": 160,
+          "type": "number",
+          "minimum": 10
+        },
+        "feelingVectorThreshold": {
+          "default": 0.25,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
         },
         "queryRecentMessages": {
           "default": 8,
@@ -1000,6 +1113,11 @@
       },
       "required": [
         "enabled",
+        "feelingRecall",
+        "feelingShare",
+        "feelingInputTokens",
+        "feelingQueryTokens",
+        "feelingVectorThreshold",
         "queryRecentMessages",
         "queryInputTokens",
         "queryTimeoutMs",
@@ -1436,6 +1554,27 @@
           "default": true,
           "type": "boolean"
         },
+        "leisureDailyLimit": {
+          "default": 5,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "moyuWeight": {
+          "default": 65,
+          "type": "number",
+          "minimum": 0
+        },
+        "chatWeight": {
+          "default": 20,
+          "type": "number",
+          "minimum": 0
+        },
+        "quietWeight": {
+          "default": 15,
+          "type": "number",
+          "minimum": 0
+        },
         "randomMinMinutes": {
           "default": 60,
           "type": "number",
@@ -1470,6 +1609,10 @@
         "script",
         "timezone",
         "randomChat",
+        "leisureDailyLimit",
+        "moyuWeight",
+        "chatWeight",
+        "quietWeight",
         "randomMinMinutes",
         "randomMaxMinutes",
         "activeStart",

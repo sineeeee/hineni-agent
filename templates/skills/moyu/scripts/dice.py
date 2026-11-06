@@ -1,52 +1,62 @@
 #!/usr/bin/env python3
-"""One roll per browsing opportunity; no daily timetable. Python 3.10+, macOS/Linux."""
+"""Choose public sources for one browsing task. Python 3.10+, macOS/Linux."""
 import argparse
 import contextlib
-import datetime as dt
 import fcntl
 import json
-import math
 import os
 from pathlib import Path
 import random
-import re
 import tempfile
-from zoneinfo import ZoneInfo
 
 BASE = Path(__file__).resolve().parent.parent
 
 
-def read_config(base=BASE):
-    cfg = json.loads((base / "config.json").read_text())
-    if type(cfg.get("dailyOpportunities")) is not int or cfg["dailyOpportunities"] < 0:
-        raise ValueError("dailyOpportunities must be a nonnegative integer")
-    weights = cfg.get("weights", {})
-    if set(weights) != {"moyu", "chat", "quiet"} or any(
-        not isinstance(n, (int, float)) or isinstance(n, bool) or not math.isfinite(n) or n < 0
-        for n in weights.values()
-    ) or not sum(weights.values()):
-        raise ValueError("weights must contain moyu/chat/quiet with a positive total")
-    for key, low, high in [("sourceCountMin", 1, 8), ("sourceCountMax", 1, 8),
-                           ("avoidRecentRolls", 0, 10), ("itemsPerSource", 1, 10),
-                           ("requestTimeoutSeconds", 1, 30)]:
-        if type(cfg.get(key)) is not int or not low <= cfg[key] <= high:
-            raise ValueError(f"invalid {key}")
-    if cfg["sourceCountMin"] > cfg["sourceCountMax"]:
-        raise ValueError("sourceCountMin exceeds sourceCountMax")
-    if not isinstance(cfg.get("sources"), dict):
-        raise ValueError("sources must be an object")
-    for key, source in cfg["sources"].items():
-        if not re.fullmatch(r"[a-z0-9_-]+", key) or not isinstance(source, dict):
-            raise ValueError("invalid source key or definition")
-        if source.get("kind") not in {"rss", "hn", "lobsters", "v2ex", "bluesky"}:
-            raise ValueError(f"unsupported public reader: {key}")
-        if not isinstance(source.get("url"), str) or not source["url"].startswith(("http://", "https://")):
-            raise ValueError(f"invalid public source URL: {key}")
-        if type(source.get("enabled")) is not bool:
-            raise ValueError("enabled must be boolean")
-    if not any(s.get("enabled") for s in cfg["sources"].values()):
-        raise ValueError("enable at least one source")
-    return cfg
+# Rules shipped with this Skill. Edit here when changing its browsing behavior.
+RULES = {'sourceCountMin': 2,
+ 'sourceCountMax': 3,
+ 'avoidRecentRolls': 1,
+ 'itemsPerSource': 4,
+ 'requestTimeoutSeconds': 10,
+ 'sources': {'d': {'name': 'Hacker News',
+                   'enabled': True,
+                   'kind': 'hn',
+                   'url': 'https://hacker-news.firebaseio.com/v0/topstories.json'},
+             'e': {'name': 'Lobsters',
+                   'enabled': True,
+                   'kind': 'lobsters',
+                   'url': 'https://lobste.rs/hottest.json'},
+             'h': {'name': 'V2EX',
+                   'enabled': True,
+                   'kind': 'v2ex',
+                   'url': 'https://www.v2ex.com/api/topics/hot.json'},
+             'i': {'name': 'Product Hunt',
+                   'enabled': True,
+                   'note': '公开Atom订阅',
+                   'kind': 'rss',
+                   'url': 'https://www.producthunt.com/feed'},
+             'm': {'name': 'Bluesky 热门',
+                   'enabled': True,
+                   'kind': 'bluesky',
+                   'url': 'https://public.api.bsky.app/xrpc/app.bsky.feed.getFeed?feed=at%3A%2F%2Fdid%3Aplc%3Az72i7hdynmk6r22z27h6tvur%2Fapp.bsky.feed.generator%2Fwhats-hot&limit=20'},
+             'n': {'name': 'Tildes',
+                   'enabled': True,
+                   'note': '公开Atom订阅',
+                   'kind': 'rss',
+                   'url': 'https://tildes.net/topics.atom'},
+             'o': {'name': 'MetaFilter',
+                   'enabled': True,
+                   'note': '公开RSS订阅',
+                   'kind': 'rss',
+                   'url': 'https://feeds.feedburner.com/Metafilter'},
+             'p': {'name': 'Colossal',
+                   'enabled': True,
+                   'kind': 'rss',
+                   'url': 'https://www.thisiscolossal.com/feed/'},
+             'q': {'name': 'Neatorama',
+                   'enabled': True,
+                   'kind': 'rss',
+                   'url': 'https://www.neatorama.com/feed/'}}}
 
 
 def atomic_json(file, value):
@@ -70,14 +80,13 @@ def locked(base):
         yield
 
 
-def current_state(base, date):
+def current_state(base):
     file = base / "state.json"
     state = json.loads(file.read_text()) if file.exists() else {}
-    if state.get("date") != date:
-        return {"date": date, "opportunities": 0, "recent_sources": [], "rolls": 0}
-    if not isinstance(state.get("opportunities"), int) or not isinstance(state.get("recent_sources"), list):
-        raise ValueError("invalid state.json; repair it before resuming")
-    return state
+    recent = state.get("recent_sources", [])
+    if not isinstance(recent, list):
+        raise ValueError("invalid state.json recent_sources")
+    return {"recent_sources": recent, "rolls": state.get("rolls", 0)}
 
 
 def choose_sources(cfg, state, rng):
@@ -92,37 +101,27 @@ def choose_sources(cfg, state, rng):
     return sorted(picked)
 
 
-def decide(cfg, state, rng, manual=False):
-    if not manual and state["opportunities"] >= cfg["dailyOpportunities"]:
-        return {"kind": "quiet", "reason": "daily_limit", "sources": []}
-    if not manual:
-        state["opportunities"] += 1
-    kind = "moyu" if manual else rng.choices(list(cfg["weights"]), weights=list(cfg["weights"].values()))[0]
-    sources = []
-    if kind == "moyu":
-        keys = choose_sources(cfg, state, rng)
-        state["recent_sources"] = (state.get("recent_sources", []) + [keys])[-10:]
-        state["rolls"] = state.get("rolls", 0) + 1
-        sources = [{"id": key, "name": cfg["sources"][key]["name"]} for key in keys]
-    return {"kind": kind, "sources": sources, "opportunities": state["opportunities"],
-            "daily_limit": cfg["dailyOpportunities"], "manual": manual}
+def decide(cfg, state, rng):
+    keys = choose_sources(cfg, state, rng)
+    state["recent_sources"] = (state.get("recent_sources", []) + [keys])[-10:]
+    state["rolls"] = state.get("rolls", 0) + 1
+    return {"sources": [{"id": key, "name": cfg["sources"][key]["name"]} for key in keys]}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["next", "opportunity", "show", "preview"], nargs="?", default="next")
+    parser.add_argument("command", choices=["next", "show", "preview"], nargs="?", default="next")
     args = parser.parse_args()
-    cfg = read_config()
-    today = dt.datetime.now(ZoneInfo(os.getenv("MOYU_TIMEZONE", "Asia/Shanghai"))).date().isoformat()
+    cfg = RULES
     if args.command == "show":
-        output = {"config": cfg, "state": current_state(BASE, today)}
+        output = {"config": cfg, "state": current_state(BASE)}
     elif args.command == "preview":
-        output = decide(cfg, current_state(BASE, today), random.Random())
+        output = decide(cfg, current_state(BASE), random.Random())
         output["preview_only"] = True
     else:
         with locked(BASE):
-            state = current_state(BASE, today)
-            output = decide(cfg, state, random.Random(), manual=args.command == "next")
+            state = current_state(BASE)
+            output = decide(cfg, state, random.Random())
             atomic_json(BASE / "state.json", state)
     print(json.dumps(output, ensure_ascii=False, indent=2))
 

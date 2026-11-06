@@ -34,6 +34,15 @@ models:
     maxOutput: 1
     reasoning: off
     compat: {}
+  summary:
+    protocol: responses
+    baseUrl: https://api.openai.com/v1
+    apiKeyEnv: OPENAI_API_KEY
+    name: gpt-4.1
+    contextWindow: 1047576
+    maxOutput: 8192
+    reasoning: off
+    compat: {}
 history:
   triggerTokens: 600000
   targetTokens: 350000
@@ -53,6 +62,11 @@ context:
   sparkTimeoutMs: 6000
 memory:
   enabled: true
+  feelingRecall: true
+  feelingShare: 0.5
+  feelingInputTokens: 1800
+  feelingQueryTokens: 160
+  feelingVectorThreshold: 0.25
   queryRecentMessages: 8
   queryInputTokens: 2500
   queryTimeoutMs: 8000
@@ -179,6 +193,10 @@ scheduler:
   script: schedule.ts
   timezone: Asia/Shanghai
   randomChat: true
+  leisureDailyLimit: 5
+  moyuWeight: 65
+  chatWeight: 20
+  quietWeight: 15
   randomMinMinutes: 60
   randomMaxMinutes: 180
   activeStart: 8

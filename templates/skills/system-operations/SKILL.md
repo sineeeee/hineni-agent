@@ -36,7 +36,7 @@ description: 管理自己的定时与随机任务、调整触发间隔和提醒�
 
 ## 摸鱼与纯聊天
 
-如果安装了skills/moyu，默认随机计时器每次机会运行该Skill的scripts/dice.py，从摸鱼、原有纯聊、安静中选一项；概率、日上限和来源在skills/moyu/config.json，保存后下次读取。读skills/moyu/SKILL.md了解抓取和分享方式。未安装或删除此Skill则恢复纯聊天，不需要另开计时器。
+个人schedule.ts管理共用随机计时器，读取自己config.yaml的scheduler：leisureDailyLimit是日上限（含安静，0为不限），moyuWeight/chatWeight/quietWeight是摸鱼、纯聊、安静的相对权重。保存后restart_scheduler。脚本只发事件，不调用Skill脚本。摸鱼事件交给主agent读skills/moyu/SKILL.md，再按Skill选站读取；浏览规则与来源自带在Skill的脚本里，无独立配置文件。未安装Skill时摸鱼机会回到纯聊天。每日次数在.runtime/leisure-state.json，重启保留次数、不保留倒计时。
 
 只改间隔、活跃时段或randomChat开关时，仍修改自己的config.yaml并restart_scheduler。用户要求立即触发摸鱼时，可把下方命令的random_chat改为moyu；它仍走同一第二层事件入口。
 

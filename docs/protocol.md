@@ -151,3 +151,20 @@ Webhook 出站向配置 URL POST `{protocol_version:1,delivery,part}`，带 `Ide
 返回query原材料和扩展、实际辅助调用记录、所有条目的相关性/状态贡献/候选和选中排名、后续联想/预算结果及output。仅显式POST可能产生模型费用；不创建事件、不调用主模型、不写真实记忆/索引/状态或召回计数。日志可以记录诊断信息。检索材料不自动附最近对话，随机分支按本次独立抽签。
 
 context模式返回stages（id/group/title/kind/prompt/input/cumulative/explanation/parameters）、context（第三层system与messages）、layout（含历史省略占位）及原有评分/调用字段。省略历史和此前输入、附件，不触发主模型；状态/索引/配置/历史均只读。按统一开始时间计算，辅助调用与概率可能与稍后正式运行不同。stages里的辅助请求和中间评分不是全部发给主模型的内容，kind明确区分。
+
+
+### 记忆管理（管理员鉴权）
+
+- GET `/v1/agents/:agent/memory/inspect` 返回version（memory.json内容版本）与条目/索引快照。
+- POST `/v1/agents/:agent/memory/entries`：`{version,entry,rebuild?:false}`，新增JSON条目，服务端生成ID。
+- PUT `/v1/agents/:agent/memory/entries/:id`：同上，替换一条完整JSON对象，ID不可改。
+- DELETE `/v1/agents/:agent/memory/entries/:id`：`{version}`，移除原文与双侧派生索引。
+- POST `/v1/agents/:agent/memory/reindex`：`{background?:false,side?:"both"|"fact"|"feeling",ids?:string[],force?:false}`。省略ids处理全部；force=false补齐缺失，true清除选定侧旧向量后重建。后台返回202，使用原index-status查询进度；明确范围的手动重建正在运行时返回409。
+
+CRUD版本冲突返回409，不覆盖更新后的记忆。修改原文后立即同步文字索引，向量生成独立进行；模型失败不回滚已保存原文。外部Skill直接写文件仍由既有同步流程发现，下一次召回前同步；应用内编辑串行，无法为任意外部脚本提供文件锁，避免同时修改同一文件。
+
+### 手动历史压缩
+
+`POST /v1/agents/:agent/history-compact`，body `{}`，使用现有管理认证，返回 202 和任务状态。跳过自动触发阈值，复用当前配置的历史裁切与摘要逻辑。未知/停用 agent 返回 400；待重载配置、执行中、发送中或待回复输入返回 409。
+
+`GET /v1/agents/:agent/history-view` 新增 `compaction`（未运行过为 null），字段：`id`、`status`（running/completed/failed/cancelled/skipped）、`started_at`、`finished_at`、`duration_ms`、`completed_batches`、`before_tokens`、`after_tokens`、`target_tokens`、`summary_tokens`、`summary`、`error`；结束字段仅在可用时返回。沿用 `/v1/agents/:agent/cancel` 取消，新输入和服务停止也取消。该任务复用 Runtime 的 active 执行槽，因此 status.active 会显示操作 ID，但不创建对话 run 或聊天事件。状态仅保留本进程最近一次，摘要成功时才写原有检查点。

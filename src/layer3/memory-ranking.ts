@@ -75,6 +75,8 @@ export function synchronizeMemoryIndex(
     summary: string;
     details: string;
     people: unknown[];
+    emotion?: any;
+    agent_name?: string;
   }>,
   index: Record<string, any>,
   signature: string,
@@ -85,16 +87,86 @@ export function synchronizeMemoryIndex(
   for (const m of items) {
     const hash = createHash("sha256").update(JSON.stringify(m)).digest("hex"),
       old = index[m.id];
-    if (!old || old.hash !== hash || old.embeddingModel !== signature)
+    const factText =
+      m.summary +
+      "\n" +
+      m.details +
+      "\n" +
+      JSON.stringify(m.people) +
+      "\n" +
+      (m.agent_name ?? "");
+    const feelingText = [
+      Array.isArray(m.emotion?.labels)
+        ? m.emotion.labels
+            .filter((x: unknown) => typeof x === "string")
+            .join("、")
+        : "",
+      typeof m.emotion?.feeling === "string" ? m.emotion.feeling : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const reusable = old?.version === 2 && old.embeddingModel === signature;
+    if (
+      !old ||
+      old.hash !== hash ||
+      old.embeddingModel !== signature ||
+      old.version !== 2
+    )
       index[m.id] = {
         hash,
-        text: m.summary + "\n" + m.details + "\n" + JSON.stringify(m.people),
-        description: "",
-        vectors: [],
+        version: 2,
+        text: factText,
+        feelingText,
+        feelingVectors:
+          reusable && old.feelingText === feelingText
+            ? (old.feelingVectors ?? [])
+            : [],
+        description: reusable && old.text === factText ? old.description : "",
+        vectors: reusable && old.text === factText ? old.vectors : [],
         strength: old?.strength ?? 1,
         strengthAt: old?.strengthAt ?? new Date(now).toISOString(),
         familiarity: old?.familiarity ?? 0,
         embeddingModel: signature,
       };
   }
+}
+
+/** Quotas concern retrieval slots, before temporal expansion and prompt budgeting. */
+export function balancedMemories<T extends { score: number }>(
+  rows: T[],
+  limit: number,
+  feelingShare: number,
+  fact: (row: T) => boolean,
+  feeling: (row: T) => boolean,
+  onPick?: (picked: T, remaining: T[]) => void,
+): Array<{ value: T; route: "fact" | "feeling" }> {
+  const pool = [...rows],
+    selected: Array<{ value: T; route: "fact" | "feeling" }> = [];
+  const quotas = {
+    feeling: Math.round(limit * feelingShare),
+    fact: limit - Math.round(limit * feelingShare),
+  };
+  const used = { fact: 0, feeling: 0 };
+  while (pool.length && selected.length < limit) {
+    pool.sort((a, b) => b.score - a.score);
+    const preferred =
+      used.fact < quotas.fact &&
+      (used.feeling >= quotas.feeling ||
+        used.fact / Math.max(1, quotas.fact) <=
+          used.feeling / Math.max(1, quotas.feeling))
+        ? "fact"
+        : "feeling";
+    let route: "fact" | "feeling" = preferred;
+    let i = pool.findIndex(route === "fact" ? fact : feeling);
+    if (i < 0) {
+      route = route === "fact" ? "feeling" : "fact";
+      i = pool.findIndex(route === "fact" ? fact : feeling);
+    }
+    if (i < 0) break;
+    const [value] = pool.splice(i, 1);
+    used[route]++;
+    selected.push({ value, route });
+    onPick?.(value, pool);
+  }
+  return selected;
 }

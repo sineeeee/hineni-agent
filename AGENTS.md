@@ -84,7 +84,7 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 
 ## 补充代码入口与约定
 
-- 可选摸鱼：templates/skills/moyu 是模板，实际文件在个人 skills/moyu；scripts/schedule.ts 的 leisureEvent 接到同一内部事件协议。仅通过Python标准库读取公开API/RSS，说明与脚本按Skill组织；配置/迁移见 operations.md 的摸鱼章节。
+- 可选摸鱼：templates/skills/moyu 是模板，实际文件在个人 skills/moyu；scripts/schedule.ts 的 leisureEvent 接到同一内部事件协议。调度参数在个人config.yaml的scheduler，日计数由src/shared/leisure.ts维护；Skill仅通过Python标准库读取公开API/RSS，浏览规则和来源直接随Skill脚本提供，无独立配置文件；配置/迁移见 operations.md 的摸鱼章节。
 
 - 状态映射：src/config/prompt-mapping.ts校验默认值，layer3/state-context.ts渲染；配置方法见configuration-guide.md的“状态与时间映射”。
 - 辅助模型：src/config/auxiliary.ts读个人规则；layer3/spark.ts生成临时想象，shared/probability.ts执行每轮抽样。概率只控制注入，不决定任务执行。
@@ -97,3 +97,5 @@ Runtime.tick → History → ContextBuilder.build → PiExecutor
 - 网页重启只重建配置组件。源码更新需完整重启Node并核对新PID/schema；文档整理无需重启，见operations.md。
 
 文档按功能维护现有手册；修复和配置变化直接更新相应章节，验证范围汇总到validation.md，对话实验汇总到dialogue-evaluation.md。不要每个补丁新增日期报告。生成文档以代码说明为源，不能手改生成产物。
+
+生活日记：摸鱼/记忆Skill维护 `workspace/diary/YYYY-MM-DD.md`，不是核心事件或新数据库；整理范围使用既有 `.runtime/memory-review.json` 的可选 diary_through_date，重读边界日期防止漏掉追加内容。入口：templates/skills/{moyu,personal-memory}/SKILL.md；实际文件位于对应agents目录，初始化只补缺失文件。

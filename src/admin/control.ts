@@ -124,6 +124,7 @@ export async function controls(
       )[0]?.reply_target ?? a.defaultTarget;
     return {
       ...view,
+      compaction: runtime.historyCompaction(id),
       remaining: view.remaining.slice(offset, offset + limit),
       total: view.remaining.length,
       next_offset:
@@ -212,6 +213,21 @@ export async function controls(
         id,
         body.mode === "all" ? "all" : body.event_ids,
       );
+    },
+  );
+  app.post<{ Params: { agent: string } }>(
+    "/v1/agents/:agent/history-compact",
+    async (req, reply) => {
+      z.object({})
+        .strict()
+        .parse(req.body ?? {});
+      if (config.current !== runtime.cfg)
+        return reply
+          .code(409)
+          .send({ error: "有未生效配置，请先重启服务再按新配置压缩。" });
+      return reply
+        .code(202)
+        .send(runtime.compactHistory(agent(req.params.agent)));
     },
   );
   app.delete<{ Params: { agent: string } }>(

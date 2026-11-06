@@ -25,6 +25,7 @@ async function fixture(t: any) {
     channels: [{ id: "local", type: "webhook" }],
     agents: [{ id: "main", name: "Main", defaultTarget: target }],
     memory: {
+      feelingRecall: false,
       maxItems: 2,
       temporalNeighbors: 1,
       associationProbability: 1,
@@ -320,4 +321,423 @@ test("memory inspection routes validate inputs, scope agents, and serve browser 
   assert.equal(response.json().agent_id, "main");
   assert.ok(client.includes("memory:renderMemory"));
   new Function(client);
+});
+
+test("dual recall separates text, merges IDs once, excludes state from feeling query and previews without writes", async (t) => {
+  const f = await fixture(t);
+  f.cfg.memory.feelingRecall = true;
+  f.cfg.memory.query = false;
+  f.cfg.memory.rerank = false;
+  f.cfg.memory.temporalNeighbors = 0;
+  f.cfg.memory.associationProbability = 0;
+  f.cfg.memory.maxItems = 5;
+  const raw = {
+    memory: f.items.map((m) => ({
+      ...m,
+      emotion:
+        m.id === "neighbor"
+          ? { labels: ["被理解"], feeling: "终于有人听懂那份等待" }
+          : { labels: [], feeling: "" },
+    })),
+  };
+  await fs.writeFile(path.join(f.root, "memory.json"), JSON.stringify(raw));
+  const calls: any[] = [];
+  const llm: Intelligence = {
+    json: async (prompt, input) => {
+      calls.push({ prompt, input });
+      return { feeling_query: "被理解" };
+    },
+    embed: async () => {
+      throw Error("offline: lexical fallback");
+    },
+    summarize: async () => "",
+  };
+  const memory = new MemoryService(f.root, "main", f.db, f.cfg, llm);
+  await memory.sync(false);
+  const before = await f.preserved();
+  const trial = await memory.simulateRecall("拉面");
+  assert.deepEqual(
+    new Set(trial.output.map((m: any) => m.id)),
+    new Set(["anchor", "neighbor"]),
+  );
+  assert.equal(
+    new Set(trial.output.map((m: any) => m.id)).size,
+    trial.output.length,
+  );
+  assert.equal(trial.query.feeling, "被理解");
+  assert.deepEqual(Object.keys(calls[0].input).sort(), ["route", "text"]);
+  assert.equal(calls[0].input.text, "拉面");
+  assert.equal(await f.preserved(), before);
+  const index = await memory.index();
+  assert.ok(!index.neighbor.text.includes("被理解"));
+  assert.equal(index.neighbor.feelingText, "被理解\n终于有人听懂那份等待");
+  assert.deepEqual(
+    trial.search.entries.find((x: any) => x.id === "neighbor").matched_routes,
+    ["feeling"],
+  );
+  const broken = new MemoryService(f.root, "main", f.db, f.cfg, {
+    ...llm,
+    json: async () => {
+      throw Error("unavailable");
+    },
+  });
+  const fallback = await broken.simulateRecall("拉面");
+  assert.deepEqual(
+    fallback.output.map((m: any) => m.id),
+    ["anchor"],
+  );
+});
+
+test("dual index invalidates only changed content and preserves lifetime factors", () => {
+  const item = {
+    id: "one",
+    summary: "fact",
+    details: "detail",
+    people: ["owner"],
+    emotion: { labels: ["joy"], feeling: "warm" },
+  };
+  const index: Record<string, any> = {};
+  synchronizeMemoryIndex([item], index, "model", Date.now());
+  Object.assign(index.one, {
+    vectors: [[1, 0]],
+    feelingVectors: [[0, 1]],
+    description: "fact description",
+    strength: 0.7,
+    familiarity: 4,
+  });
+  synchronizeMemoryIndex(
+    [{ ...item, emotion: { labels: ["joy"], feeling: "closer" } }],
+    index,
+    "model",
+    Date.now(),
+  );
+  assert.deepEqual(index.one.vectors, [[1, 0]]);
+  assert.deepEqual(index.one.feelingVectors, []);
+  assert.equal(index.one.familiarity, 4);
+  assert.equal(index.one.strength, 0.7);
+  index.one.feelingVectors = [[0, 1]];
+  synchronizeMemoryIndex(
+    [
+      {
+        ...item,
+        details: "changed",
+        emotion: { labels: ["joy"], feeling: "closer" },
+      },
+    ],
+    index,
+    "model",
+    Date.now(),
+  );
+  assert.deepEqual(index.one.vectors, []);
+  assert.deepEqual(index.one.feelingVectors, [[0, 1]]);
+  synchronizeMemoryIndex([], index, "model", Date.now());
+  assert.deepEqual(index, {});
+});
+
+test("feeling index maintenance survives fact-model failure and retries only missing side", async (t) => {
+  const f = await fixture(t);
+  f.cfg.memory.feelingRecall = true;
+  await fs.writeFile(
+    path.join(f.root, "memory.json"),
+    JSON.stringify({
+      memory: [
+        {
+          ...f.items[0],
+          details: "new fact content",
+          emotion: { labels: ["安心"], feeling: "有人陪着" },
+        },
+      ],
+    }),
+  );
+  let fail = true;
+  const inputs: string[] = [];
+  const llm: Intelligence = {
+    json: async (_p, input) => {
+      assert.ok(!("emotion" in (input as any).memory));
+      if (fail) throw Error("fact description unavailable");
+      return { search_text: "拉面" };
+    },
+    embed: async (texts) => {
+      inputs.push(...texts);
+      return texts.map(() => [1, 0]);
+    },
+    summarize: async () => "",
+  };
+  const m = new MemoryService(f.root, "main", f.db, f.cfg, llm);
+  await m.sync(true);
+  let row = (await m.index()).anchor;
+  assert.equal(row.vectors.length, 0);
+  assert.equal(row.feelingVectors.length, 1);
+  assert.equal((await m.indexStatus()).ready, 0);
+  fail = false;
+  await m.sync(true);
+  row = (await m.index()).anchor;
+  assert.equal(row.vectors.length, 1);
+  assert.equal((await m.indexStatus()).ready, 1);
+  assert.equal(inputs.filter((x) => x.includes("有人陪着")).length, 1);
+});
+
+test("memory CRUD persists JSON first, invalidates one side, rejects stale editors and deletes both indexes", async (t) => {
+  const f = await fixture(t);
+  let view = await f.memory.inspectMemories();
+  const created = await f.memory.changeMemory("create", view.version, {
+    occurred_at: "2026-11-05",
+    summary: "新增一条",
+    details: "事实",
+    people: [],
+    emotion: { labels: ["温暖"], feeling: "感受" },
+    importance: 3,
+  });
+  const disk = JSON.parse(
+    await fs.readFile(path.join(f.root, "memory.json"), "utf8"),
+  );
+  assert.equal(disk.memory.at(-1).id, created.id);
+  let ix = await f.memory.index();
+  assert.ok(ix[created.id!]);
+  assert.deepEqual(ix[created.id!].vectors, []);
+  await assert.rejects(
+    () => f.memory.changeMemory("delete", view.version, undefined, created.id),
+    /刷新/,
+  );
+  ix[created.id!].vectors = [[1, 0]];
+  ix[created.id!].feelingVectors = [[0, 1]];
+  f.db.set("index:main", ix);
+  view = await f.memory.inspectMemories();
+  const old = view.rows.find((x) => x.id === created.id)!.memory;
+  await f.memory.changeMemory(
+    "update",
+    view.version,
+    { ...old, emotion: { labels: ["温暖"], feeling: "改变感受" } },
+    created.id,
+  );
+  ix = await f.memory.index();
+  assert.deepEqual(ix[created.id!].vectors, [[1, 0]]);
+  assert.deepEqual(ix[created.id!].feelingVectors, []);
+  view = await f.memory.inspectMemories();
+  await f.memory.updateState((s) => {
+    s.activation[created.id!] = Date.now();
+  });
+  await f.memory.changeMemory("delete", view.version, undefined, created.id);
+  assert.ok(!(await f.memory.index())[created.id!]);
+  assert.ok(
+    !JSON.parse(
+      await fs.readFile(
+        path.join(f.root, ".runtime/search-index.json"),
+        "utf8",
+      ),
+    )[created.id!],
+  );
+  assert.ok(
+    !JSON.parse(
+      await fs.readFile(path.join(f.root, "memory.json"), "utf8"),
+    ).memory.some((x: any) => x.id === created.id),
+  );
+  assert.ok(!(await f.memory.state()).activation[created.id!]);
+  assert.equal((await f.memory.items()).length, f.items.length);
+});
+
+test("explicit rebuild of one memory side preserves other vectors and familiarity", async (t) => {
+  const f = await fixture(t);
+  f.cfg.memory.searchDescription = false;
+  f.cfg.memory.feelingRecall = true;
+  await fs.writeFile(
+    path.join(f.root, "memory.json"),
+    JSON.stringify({
+      memory: [
+        { ...f.items[0], emotion: { labels: ["开心"], feeling: "舒心" } },
+      ],
+    }),
+  );
+  const calls: string[] = [];
+  const m = new MemoryService(f.root, "main", f.db, f.cfg, {
+    json: async () => ({}),
+    embed: async (texts) => {
+      calls.push(...texts);
+      return texts.map(() => [0.5, 0.5]);
+    },
+    summarize: async () => "",
+  });
+  await m.sync(true);
+  const ix = await m.index();
+  ix.anchor.familiarity = 7;
+  ix.anchor.vectors = [[1, 0]];
+  f.db.set("index:main", ix);
+  calls.length = 0;
+  await m.sync(true, { side: "feeling", ids: ["anchor"], force: true });
+  assert.ok(calls.length === 1 && calls[0].includes("舒心"));
+  assert.deepEqual((await m.index()).anchor.vectors, [[1, 0]]);
+  assert.equal((await m.index()).anchor.familiarity, 7);
+  calls.length = 0;
+  await m.sync(true, { side: "fact", ids: ["anchor"], force: true });
+  assert.ok(calls.length === 1 && !calls[0].includes("舒心"));
+});
+
+test("balanced retrieval allocates half the slots and borrows only when a route is short", async () => {
+  const { balancedMemories } = await import("../src/layer3/memory-ranking.js");
+  const rows = Array.from({ length: 12 }, (_, i) => ({
+    id: i,
+    score: 100 - i,
+    fact: i < 8,
+    feeling: i >= 8,
+  }));
+  const pick = balancedMemories(
+    rows,
+    8,
+    0.5,
+    (x) => x.fact,
+    (x) => x.feeling,
+  );
+  assert.equal(pick.filter((x) => x.route === "fact").length, 4);
+  assert.equal(pick.filter((x) => x.route === "feeling").length, 4);
+  const overlap = balancedMemories(
+    rows.map((x) => ({ ...x, feeling: true })),
+    8,
+    0.5,
+    (x) => x.fact,
+    (x) => x.feeling,
+  );
+  assert.equal(new Set(overlap.map((x) => x.value.id)).size, 8);
+  const short = balancedMemories(
+    rows.filter((x) => x.id < 9),
+    8,
+    0.5,
+    (x) => x.fact,
+    (x) => x.feeling,
+  );
+  assert.equal(short.length, 8);
+  assert.equal(short.filter((x) => x.route === "feeling").length, 1);
+});
+
+test("memory page renders CRUD controls and saves through the scoped HTTP routes", async (t) => {
+  const f = await fixture(t),
+    app = Fastify();
+  t.after(() => app.close());
+  app.setErrorHandler((e, _q, r) =>
+    r.code((e as any).statusCode ?? 400).send({ error: String(e) }),
+  );
+  memoryRoutes(app, {
+    memories: new Map([["main", f.memory]]),
+  } as unknown as Runtime);
+  const { memoryClient } = await import("../src/admin/memory-client.js");
+  let nodes: any[] = [];
+  const notices: string[] = [];
+  const el = (tag: string, attrs: any = {}, ...children: any[]) => {
+    const n = {
+      tag,
+      ...attrs,
+      children: children.flat(),
+      append(...xs: any[]) {
+        this.children.push(...xs);
+      },
+    };
+    nodes.push(n);
+    return n;
+  };
+  const btn = (text: string, onclick: () => unknown) =>
+    el("button", { text, onclick });
+  const api = async (url: string, method = "GET", body?: unknown) => {
+    const res = await app.inject({
+      url,
+      method: method as any,
+      ...(body ? { payload: body } : {}),
+    });
+    const data = res.json();
+    if (res.statusCode >= 400) throw Error(data.error);
+    return data;
+  };
+  let render: () => Promise<unknown>;
+  render = new Function(
+    "el",
+    "panel",
+    "btn",
+    "api",
+    "replaceContent",
+    "notify",
+    "show",
+    "confirm",
+    "jsonViewer",
+    "time",
+    "agentId",
+    "view",
+    "startVectorize",
+    memoryClient + ";return renderMemory;",
+  )(
+    el,
+    (title: string, ...xs: any[]) => el("section", { title }, ...xs),
+    btn,
+    api,
+    (n: any, ...xs: any[]) => {
+      n.children = xs;
+    },
+    (s: string) => notices.push(s),
+    async () => {
+      nodes = [];
+      return render();
+    },
+    () => true,
+    () => el("pre"),
+    (x: string) => x,
+    "main",
+    "memory",
+    () => {},
+  );
+  await render();
+  assert.ok(nodes.some((n) => n.text === "重建事实侧"));
+  assert.ok(nodes.some((n) => n.text === "重建感受侧"));
+  await nodes.find((n) => n.text === "新增记忆").onclick();
+  const input = nodes.find((n) => n["aria-label"] === "记忆条目 JSON");
+  assert.equal(input.wrap, "off");
+  const entry = JSON.parse(input.value);
+  entry.summary = "UI CRUD test";
+  entry.details = "new fact";
+  input.value = JSON.stringify(entry);
+  await nodes.find((n) => n.text === "只保存").onclick();
+  assert.ok(notices.some((s) => s.includes("记忆已保存")));
+  await nodes.find((n) => n.text === "UI CRUD test").onclick();
+  await nodes.find((n) => n.text === "编辑此条").onclick();
+  const edit = nodes.find((n) => n["aria-label"] === "记忆条目 JSON");
+  const changed = JSON.parse(edit.value);
+  changed.summary = "UI edited";
+  edit.value = JSON.stringify(changed);
+  await nodes.find((n) => n.text === "只保存").onclick();
+  await nodes.find((n) => n.text === "UI edited").onclick();
+  await nodes.find((n) => n.text === "删除此条").onclick();
+  assert.equal((await f.memory.items()).length, f.items.length);
+  const res = await app.inject({
+    method: "POST",
+    url: "/v1/agents/other/memory/entries",
+    payload: { version: "x", entry: {} },
+  });
+  assert.equal(res.statusCode, 400);
+});
+
+test("deleting while vector generation is in flight cannot resurrect the memory", async (t) => {
+  const f = await fixture(t);
+  f.cfg.memory.searchDescription = false;
+  await fs.writeFile(
+    path.join(f.root, "memory.json"),
+    JSON.stringify({
+      memory: [{ ...f.items[0], details: "changed for rebuild" }],
+    }),
+  );
+  let release!: () => void, started!: () => void;
+  const waiting = new Promise<void>((r) => (release = r)),
+    began = new Promise<void>((r) => (started = r));
+  const memory = new MemoryService(f.root, "main", f.db, f.cfg, {
+    json: async () => ({}),
+    summarize: async () => "",
+    embed: async (texts) => {
+      started();
+      await waiting;
+      return texts.map(() => [1, 0]);
+    },
+  });
+  const work = memory.sync(true);
+  await began;
+  const snap = await memory.inspectMemories();
+  await memory.changeMemory("delete", snap.version, undefined, "anchor");
+  release();
+  await work;
+  assert.deepEqual(await memory.items(), []);
+  assert.deepEqual(await memory.index(), {});
 });
